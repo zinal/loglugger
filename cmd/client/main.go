@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -74,13 +75,18 @@ func main() {
 		TLSConfig:   tlsConfig,
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	position, reset := fetchStartupPosition(ctx, sender)
+	position, reset, err := fetchStartupPosition(ctx, sender)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			slog.Info("shutting down")
+			return
+		}
+		slog.Error("fetch startup position", "error", err)
+		os.Exit(1)
+	}
 	if err := journal.SeekToPosition(ctx, position); err != nil {
 		slog.Warn("seek failed, using reset", "position", position, "error", err)
 		reset = true
@@ -95,13 +101,8 @@ func main() {
 
 	for {
 		select {
-		case <-sigCh:
-			slog.Info("shutting down")
-			if batch := batcher.Flush(); batch != nil {
-				reset = sendBatch(ctx, journal, sender, batch, reset)
-			}
-			return
 		case <-ctx.Done():
+			slog.Info("shutting down")
 			return
 		case <-flushTicker.C:
 			if batch := batcher.Flush(); batch != nil {
@@ -198,16 +199,19 @@ func parseServerURLs(raw string) []string {
 	return out
 }
 
-func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bool) {
+func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bool, error) {
 	resp, err := sender.CurrentPosition(ctx)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", true, err
+		}
 		slog.Warn("fetch startup position", "error", err)
-		return "", true
+		return "", true, nil
 	}
 	if resp == nil || resp.Status == "not_found" || resp.CurrentPosition == "" {
-		return "", true
+		return "", true, nil
 	}
-	return resp.CurrentPosition, false
+	return resp.CurrentPosition, false, nil
 }
 
 func sendBatch(ctx context.Context, journal client.JournalReader, sender client.Sender, batch *client.Batch, reset bool) bool {
@@ -219,6 +223,10 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 	}
 	resp, err := sender.Send(ctx, req)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			slog.Info("send interrupted", "error", err)
+			return reset
+		}
 		slog.Error("send batch", "error", err)
 		return reset
 	}

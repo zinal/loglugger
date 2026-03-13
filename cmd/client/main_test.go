@@ -13,9 +13,12 @@ import (
 )
 
 func TestFetchStartupPositionNotFound(t *testing.T) {
-	position, reset := fetchStartupPosition(context.Background(), stubSender{
+	position, reset, err := fetchStartupPosition(context.Background(), stubSender{
 		positionResp: &models.PositionResponse{Status: "not_found"},
 	})
+	if err != nil {
+		t.Fatalf("fetchStartupPosition() error = %v", err)
+	}
 	if position != "" {
 		t.Fatalf("position = %q, want empty", position)
 	}
@@ -25,14 +28,32 @@ func TestFetchStartupPositionNotFound(t *testing.T) {
 }
 
 func TestFetchStartupPositionFound(t *testing.T) {
-	position, reset := fetchStartupPosition(context.Background(), stubSender{
+	position, reset, err := fetchStartupPosition(context.Background(), stubSender{
 		positionResp: &models.PositionResponse{Status: "ok", CurrentPosition: "cursor-100"},
 	})
+	if err != nil {
+		t.Fatalf("fetchStartupPosition() error = %v", err)
+	}
 	if position != "cursor-100" {
 		t.Fatalf("position = %q, want cursor-100", position)
 	}
 	if reset {
 		t.Fatal("expected reset=false when server returns stored position")
+	}
+}
+
+func TestFetchStartupPositionCanceled(t *testing.T) {
+	position, reset, err := fetchStartupPosition(context.Background(), stubSender{
+		err: context.Canceled,
+	})
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	if position != "" {
+		t.Fatalf("position = %q, want empty", position)
+	}
+	if !reset {
+		t.Fatal("expected reset=true on cancellation")
 	}
 }
 
