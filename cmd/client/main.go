@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
@@ -148,7 +148,7 @@ func parseClientConfig() clientConfig {
 	flag.StringVar(&cfg.ServiceMask, "service-mask", "", "Filter for _SYSTEMD_UNIT")
 	flag.StringVar(&cfg.MessageRegex, "message-regex", "", "Regex to parse MESSAGE (named groups)")
 	noMatch := flag.String("message-regex-no-match", "send_raw", "When regex fails: send_raw or skip")
-	flag.IntVar(&cfg.BatchSize, "batch-size", 1000, "Max records per batch")
+	flag.IntVar(&cfg.BatchSize, "batch-size", 50000, "Max records per batch")
 	flag.DurationVar(&cfg.BatchTimeout, "batch-timeout", 5*time.Second, "Batch flush timeout")
 	flag.DurationVar(&cfg.HTTPTimeout, "http-timeout", 30*time.Second, "HTTP timeout")
 	flag.IntVar(&cfg.RetryMax, "retry-max", 5, "Max retries")
