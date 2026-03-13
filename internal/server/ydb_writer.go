@@ -19,15 +19,9 @@ type YDBWriter struct {
 
 // NewYDBWriter connects to YDB.
 func NewYDBWriter(ctx context.Context, endpoint, database string) (*YDBWriter, error) {
-	if endpoint == "" {
-		return nil, fmt.Errorf("ydb endpoint is required")
-	}
-	if database == "" {
-		return nil, fmt.Errorf("ydb database is required")
-	}
-	driver, err := ydb.Open(ctx, endpoint, ydb.WithDatabase(database), ydb.WithAnonymousCredentials())
+	driver, err := openYDBDriver(ctx, endpoint, database)
 	if err != nil {
-		return nil, fmt.Errorf("open ydb connection: %w", err)
+		return nil, err
 	}
 	return &YDBWriter{driver: driver}, nil
 }
@@ -133,4 +127,18 @@ func encodeYDBValue(value interface{}) (types.Value, error) {
 	default:
 		return nil, fmt.Errorf("unsupported YDB value type %T", value)
 	}
+}
+
+func openYDBDriver(ctx context.Context, endpoint, database string) (*ydb.Driver, error) {
+	if endpoint == "" {
+		return nil, fmt.Errorf("ydb endpoint is required")
+	}
+	if database == "" {
+		return nil, fmt.Errorf("ydb database is required")
+	}
+	driver, err := ydb.Open(ctx, endpoint, ydb.WithDatabase(database), ydb.WithAnonymousCredentials())
+	if err != nil {
+		return nil, fmt.Errorf("open ydb connection: %w", err)
+	}
+	return driver, nil
 }

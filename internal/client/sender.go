@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,32 +19,26 @@ import (
 // Sender sends batches to the server via HTTP.
 type Sender interface {
 	Send(ctx context.Context, req *models.BatchRequest) (*models.BatchResponse, error)
-}
-
-// PositionStore stores and retrieves the expected position.
-type PositionStore interface {
-	Get() (string, error)
-	Set(position string) error
+	CurrentPosition(ctx context.Context) (*models.PositionResponse, error)
 }
 
 type sender struct {
-	client       *http.Client
-	url         string
+	client      *http.Client
+	batchesURL  string
+	positionURL string
 	clientID    string
-	positionStore PositionStore
 	retryMax    int
 	retryDelay  time.Duration
 }
 
 // SenderConfig configures the sender.
 type SenderConfig struct {
-	ServerURL     string
-	ClientID      string
-	PositionStore PositionStore
-	HTTPTimeout   time.Duration
-	RetryMax      int
-	RetryDelay    time.Duration
-	TLSConfig     *tls.Config
+	ServerURL   string
+	ClientID    string
+	HTTPTimeout time.Duration
+	RetryMax    int
+	RetryDelay  time.Duration
+	TLSConfig   *tls.Config
 }
 
 // NewSender creates a sender.
@@ -57,12 +52,12 @@ func NewSender(cfg SenderConfig) Sender {
 		Transport: transport,
 	}
 	return &sender{
-		client:        client,
-		url:           strings.TrimSuffix(cfg.ServerURL, "/") + "/v1/batches",
-		clientID:      cfg.ClientID,
-		positionStore: cfg.PositionStore,
-		retryMax:      cfg.RetryMax,
-		retryDelay:   cfg.RetryDelay,
+		client:      client,
+		batchesURL:  strings.TrimSuffix(cfg.ServerURL, "/") + "/v1/batches",
+		positionURL: strings.TrimSuffix(cfg.ServerURL, "/") + "/v1/positions",
+		clientID:    cfg.ClientID,
+		retryMax:    cfg.RetryMax,
+		retryDelay:  cfg.RetryDelay,
 	}
 }
 
@@ -83,7 +78,7 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 			}
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, bytes.NewReader(body))
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.batchesURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -106,14 +101,8 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 
 		switch resp.StatusCode {
 		case http.StatusOK:
-			if batchResp.NextPosition != "" && s.positionStore != nil {
-				_ = s.positionStore.Set(batchResp.NextPosition)
-			}
 			return &batchResp, nil
 		case http.StatusConflict:
-			if batchResp.ExpectedPosition != "" && s.positionStore != nil {
-				_ = s.positionStore.Set(batchResp.ExpectedPosition)
-			}
 			return &batchResp, nil
 		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
 			return &batchResp, ErrClientError{Message: batchResp.Message}
@@ -126,6 +115,34 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 		}
 	}
 	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
+func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.positionURL+"?client_id="+url.QueryEscape(s.clientID), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var positionResp models.PositionResponse
+	if err := json.Unmarshal(body, &positionResp); err != nil {
+		return nil, fmt.Errorf("decode position response: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return &positionResp, nil
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+		return &positionResp, ErrClientError{Message: positionResp.Message}
+	default:
+		return &positionResp, fmt.Errorf("HTTP %d: %s", resp.StatusCode, positionResp.Message)
+	}
 }
 
 // ErrClientError indicates a client error (4xx) that should not be retried.

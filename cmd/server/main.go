@@ -19,7 +19,7 @@ type serverConfig struct {
 	YDBDatabase          string
 	YDBTable             string
 	PositionStoreBackend string
-	PositionFile         string
+	PositionTable        string
 	FieldMappingFile     string
 	TLSCertFile          string
 	TLSKeyFile           string
@@ -42,6 +42,13 @@ func main() {
 	if err != nil {
 		slog.Error("create position store", "error", err)
 		os.Exit(1)
+	}
+	if closer, ok := positions.(interface{ Close(context.Context) error }); ok {
+		defer func() {
+			if err := closer.Close(context.Background()); err != nil {
+				slog.Warn("close position store", "error", err)
+			}
+		}()
 	}
 	writer, err := newWriter(cfg)
 	if err != nil {
@@ -95,8 +102,8 @@ func parseServerConfig() serverConfig {
 	flag.StringVar(&cfg.YDBEndpoint, "ydb-endpoint", "", "YDB endpoint")
 	flag.StringVar(&cfg.YDBDatabase, "ydb-database", "", "YDB database path")
 	flag.StringVar(&cfg.YDBTable, "ydb-table", "logs", "YDB table name")
-	flag.StringVar(&cfg.PositionStoreBackend, "position-store", "memory", "Position store backend: memory or file")
-	flag.StringVar(&cfg.PositionFile, "position-file", "", "File used by the file-backed position store")
+	flag.StringVar(&cfg.PositionStoreBackend, "position-store", "memory", "Position store backend: memory or ydb")
+	flag.StringVar(&cfg.PositionTable, "position-table", "loglugger_positions", "YDB table name for stored client positions")
 	flag.StringVar(&cfg.FieldMappingFile, "field-mapping-file", "", "Path to YAML or JSON field mapping file")
 	flag.StringVar(&cfg.TLSCertFile, "tls-cert-file", "", "Server certificate file")
 	flag.StringVar(&cfg.TLSKeyFile, "tls-key-file", "", "Server private key file")
@@ -131,11 +138,8 @@ func newPositionStore(cfg serverConfig) (server.PositionStore, error) {
 	switch cfg.PositionStoreBackend {
 	case "memory":
 		return server.NewMemoryPositionStore(), nil
-	case "file":
-		if cfg.PositionFile == "" {
-			return nil, fmt.Errorf("position-file is required when position-store=file")
-		}
-		return server.NewFilePositionStore(cfg.PositionFile)
+	case "ydb":
+		return server.NewYDBPositionStore(context.Background(), cfg.YDBEndpoint, cfg.YDBDatabase, fullTablePath(cfg.YDBDatabase, cfg.PositionTable))
 	default:
 		return nil, fmt.Errorf("unsupported position store backend %q", cfg.PositionStoreBackend)
 	}

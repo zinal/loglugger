@@ -23,7 +23,6 @@ type clientConfig struct {
 	NoMatchAction    client.NoMatchAction
 	BatchSize        int
 	BatchTimeout     time.Duration
-	PositionFile     string
 	HTTPTimeout      time.Duration
 	RetryMax         int
 	RetryDelay       time.Duration
@@ -40,11 +39,6 @@ func main() {
 	if cfg.ClientID == "" {
 		hostname, _ := os.Hostname()
 		cfg.ClientID = hostname
-	}
-
-	var posStore client.PositionStore
-	if cfg.PositionFile != "" {
-		posStore = client.NewFilePositionStore(cfg.PositionFile)
 	}
 
 	tlsConfig, err := buildClientTLSConfig(cfg)
@@ -72,13 +66,12 @@ func main() {
 
 	batcher := client.NewBatcher(cfg.BatchSize, cfg.BatchTimeout)
 	sender := client.NewSender(client.SenderConfig{
-		ServerURL:     cfg.ServerURL,
-		ClientID:      cfg.ClientID,
-		PositionStore: posStore,
-		HTTPTimeout:   cfg.HTTPTimeout,
-		RetryMax:      cfg.RetryMax,
-		RetryDelay:    cfg.RetryDelay,
-		TLSConfig:     tlsConfig,
+		ServerURL:   cfg.ServerURL,
+		ClientID:    cfg.ClientID,
+		HTTPTimeout: cfg.HTTPTimeout,
+		RetryMax:    cfg.RetryMax,
+		RetryDelay:  cfg.RetryDelay,
+		TLSConfig:   tlsConfig,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -87,7 +80,7 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	position, reset := loadStoredPosition(posStore)
+	position, reset := fetchStartupPosition(ctx, sender)
 	if err := journal.SeekToPosition(ctx, position); err != nil {
 		slog.Warn("seek failed, using reset", "position", position, "error", err)
 		reset = true
@@ -156,7 +149,6 @@ func parseClientConfig() clientConfig {
 	noMatch := flag.String("message-regex-no-match", "send_raw", "When regex fails: send_raw or skip")
 	flag.IntVar(&cfg.BatchSize, "batch-size", 1000, "Max records per batch")
 	flag.DurationVar(&cfg.BatchTimeout, "batch-timeout", 5*time.Second, "Batch flush timeout")
-	flag.StringVar(&cfg.PositionFile, "position-file", "", "File to store position")
 	flag.DurationVar(&cfg.HTTPTimeout, "http-timeout", 30*time.Second, "HTTP timeout")
 	flag.IntVar(&cfg.RetryMax, "retry-max", 5, "Max retries")
 	flag.DurationVar(&cfg.RetryDelay, "retry-delay", time.Second, "Base retry delay")
@@ -184,16 +176,16 @@ func buildClientTLSConfig(cfg clientConfig) (*tls.Config, error) {
 	return client.LoadClientTLSConfig(cfg.TLSCAFile, cfg.TLSCAPath, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSUseSystemPool)
 }
 
-func loadStoredPosition(store client.PositionStore) (string, bool) {
-	if store == nil {
-		return "", true
-	}
-	position, err := store.Get()
+func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bool) {
+	resp, err := sender.CurrentPosition(ctx)
 	if err != nil {
-		slog.Warn("load stored position", "error", err)
+		slog.Warn("fetch startup position", "error", err)
 		return "", true
 	}
-	return position, position == ""
+	if resp == nil || resp.Status == "not_found" || resp.CurrentPosition == "" {
+		return "", true
+	}
+	return resp.CurrentPosition, false
 }
 
 func sendBatch(ctx context.Context, journal client.JournalReader, sender client.Sender, batch *client.Batch, reset bool) bool {

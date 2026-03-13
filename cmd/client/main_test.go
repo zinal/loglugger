@@ -8,13 +8,27 @@ import (
 	"github.com/mzinal/loglugger/internal/models"
 )
 
-func TestLoadStoredPositionNilStore(t *testing.T) {
-	position, reset := loadStoredPosition(nil)
+func TestFetchStartupPositionNotFound(t *testing.T) {
+	position, reset := fetchStartupPosition(context.Background(), stubSender{
+		positionResp: &models.PositionResponse{Status: "not_found"},
+	})
 	if position != "" {
 		t.Fatalf("position = %q, want empty", position)
 	}
 	if !reset {
-		t.Fatal("expected reset=true when no position store is configured")
+		t.Fatal("expected reset=true when server has no stored position")
+	}
+}
+
+func TestFetchStartupPositionFound(t *testing.T) {
+	position, reset := fetchStartupPosition(context.Background(), stubSender{
+		positionResp: &models.PositionResponse{Status: "ok", CurrentPosition: "cursor-100"},
+	})
+	if position != "cursor-100" {
+		t.Fatalf("position = %q, want cursor-100", position)
+	}
+	if reset {
+		t.Fatal("expected reset=false when server returns stored position")
 	}
 }
 
@@ -66,12 +80,17 @@ func TestSendBatchFallsBackToResetOnSeekFailure(t *testing.T) {
 }
 
 type stubSender struct {
-	resp *models.BatchResponse
-	err  error
+	resp         *models.BatchResponse
+	positionResp *models.PositionResponse
+	err          error
 }
 
 func (s stubSender) Send(ctx context.Context, req *models.BatchRequest) (*models.BatchResponse, error) {
 	return s.resp, s.err
+}
+
+func (s stubSender) CurrentPosition(ctx context.Context) (*models.PositionResponse, error) {
+	return s.positionResp, s.err
 }
 
 type stubJournalReader struct {

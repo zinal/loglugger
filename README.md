@@ -36,9 +36,11 @@ After building, use `./bin/server` and `./bin/client` in the run commands below.
 Useful server flags:
 
 - `-writer mock|ydb` chooses the output backend.
-- `-position-store memory|file` chooses in-memory or file-backed position tracking.
+- `-position-store memory|ydb` chooses in-memory or YDB-backed position tracking.
+- `-position-table loglugger_positions` sets the YDB table used to persist expected client positions.
 - `-field-mapping-file mapping.yaml` loads YAML/JSON source-to-destination mappings.
 - `-tls-client-subject-cn`, `-tls-client-subject-o`, `-tls-client-subject-ou` restrict accepted client certificate subjects.
+- The client fetches its startup position from `GET /v1/positions?client_id=...` and does not keep a local position file.
 
 **Client** (Linux only):
 ```bash
@@ -52,7 +54,6 @@ Useful server flags:
 
 Useful client flags:
 
-- `-position-file state/cursor.txt` stores the last accepted position on disk.
 - `-service-mask nginx.service` uses exact systemd unit matching.
 - `-service-mask 'nginx*.service'` uses glob matching.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
@@ -61,7 +62,7 @@ Useful client flags:
 
 ### Example Mapping Files
 
-- `examples/mappings/basic.yaml` is a readable starter mapping for local mock or file-backed runs.
+- `examples/mappings/basic.yaml` is a readable starter mapping for local mock or YDB-backed runs.
 - `examples/mappings/ydb.json` is the same idea in JSON and is convenient when wiring the YDB writer.
 
 ### Local mTLS Setup
@@ -107,8 +108,10 @@ If you want the server to enforce client subject checks as well as CA trust, sta
   -tls-client-subject-o dev \
   -tls-client-subject-ou local \
   -field-mapping-file examples/mappings/basic.yaml \
-  -position-store file \
-  -position-file state/server-positions.json
+  -position-store ydb \
+  -ydb-endpoint grpcs://localhost:2135 \
+  -ydb-database /local \
+  -position-table loglugger_positions
 ```
 
 For a local mock-backed end-to-end run:
@@ -129,7 +132,6 @@ For a local mock-backed end-to-end run:
   -tls-ca-file certs/ca.crt \
   -tls-cert-file certs/client.crt \
   -tls-key-file certs/client.key \
-  -position-file state/client-position.txt \
   -message-regex '^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*)$'
 ```
 
@@ -143,7 +145,17 @@ Includes unit tests for parser, batcher, models, handler, and a functional test 
 
 ## YDB Integration
 
-The server supports `-writer ydb` and uses `github.com/ydb-platform/ydb-go-sdk/v3` for `BulkUpsert`. Supply `-ydb-endpoint`, `-ydb-database`, and `-ydb-table` when enabling the YDB backend. `MockWriter` remains available for tests and local dry runs.
+The server supports `-writer ydb` and uses `github.com/ydb-platform/ydb-go-sdk/v3` for `BulkUpsert`. Supply `-ydb-endpoint`, `-ydb-database`, and `-ydb-table` when enabling the YDB backend. The position store can also use YDB via `-position-store ydb` and `-position-table`. `MockWriter` remains available for tests and local dry runs.
+
+Create the YDB table for the position store before starting the server with `-position-store ydb`:
+
+```sql
+CREATE TABLE `loglugger_positions` (
+  client_id Utf8 NOT NULL,
+  expected_position Utf8 NOT NULL,
+  PRIMARY KEY (client_id)
+);
+```
 
 Example YDB run:
 
@@ -158,6 +170,6 @@ Example YDB run:
   -tls-key-file certs/server.key \
   -tls-ca-file certs/ca.crt \
   -field-mapping-file examples/mappings/ydb.json \
-  -position-store file \
-  -position-file state/server-positions.json
+  -position-store ydb \
+  -position-table loglugger_positions
 ```

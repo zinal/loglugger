@@ -30,10 +30,21 @@ func NewHandler(positions PositionStore, mapper Mapper, writer Writer, table str
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost || r.URL.Path != "/v1/batches" {
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/positions":
+		resp := h.handlePosition(r.Context(), r.URL.Query().Get("client_id"))
+		h.writePositionResponse(w, resp)
+		return
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/batches":
+		h.serveBatch(w, r)
+		return
+	default:
 		http.NotFound(w, r)
 		return
 	}
+}
+
+func (h *Handler) serveBatch(w http.ResponseWriter, r *http.Request) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		h.writeError(w, http.StatusBadRequest, "Content-Type must be application/json")
@@ -48,6 +59,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp := h.handle(r.Context(), &req)
 	h.writeResponse(w, resp)
+}
+
+func (h *Handler) handlePosition(ctx context.Context, clientID string) *models.PositionResponse {
+	if clientID == "" {
+		return &models.PositionResponse{Status: "error", Message: "client_id is required"}
+	}
+	position, ok, err := h.positions.Get(ctx, clientID)
+	if err != nil {
+		return &models.PositionResponse{Status: "error", Message: err.Error()}
+	}
+	if !ok {
+		return &models.PositionResponse{Status: "not_found"}
+	}
+	return &models.PositionResponse{Status: "ok", CurrentPosition: position}
 }
 
 func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.BatchResponse {
@@ -138,4 +163,18 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(&models.BatchResponse{Status: "error", Message: msg})
+}
+
+func (h *Handler) writePositionResponse(w http.ResponseWriter, resp *models.PositionResponse) {
+	status := http.StatusOK
+	if resp.Status == "error" {
+		if resp.Message == "client_id is required" {
+			status = http.StatusBadRequest
+		} else {
+			status = http.StatusInternalServerError
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(resp)
 }

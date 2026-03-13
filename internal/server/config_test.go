@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -66,27 +65,11 @@ field_mapping:
 	}
 }
 
-func TestFilePositionStorePersistsValues(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "positions.json")
-	store, err := NewFilePositionStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Set(ctx, "client-a", "cursor-1"); err != nil {
-		t.Fatal(err)
-	}
-
-	reloaded, err := NewFilePositionStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, ok, err := reloaded.Get(ctx, "client-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || got != "cursor-1" {
-		t.Fatalf("Get() = (%q, %v), want (cursor-1, true)", got, ok)
+func TestQuoteYDBPath(t *testing.T) {
+	got := quoteYDBPath("/local/path`withtick")
+	want := "`/local/path``withtick`"
+	if got != want {
+		t.Fatalf("quoteYDBPath() = %q, want %q", got, want)
 	}
 }
 

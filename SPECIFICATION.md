@@ -1,15 +1,5 @@
 # Loglugger: Formal Specification
 
-## Document Information
-
-| Field | Value |
-|-------|-------|
-| Version | 1.2 |
-| Date | 2025-03-13 |
-| Status | Draft |
-
----
-
 ## 1. Overview
 
 Loglugger is a two-component system for collecting log records from systemd journald and persisting them to YDB (Yandex Database). The architecture consists of:
@@ -81,13 +71,15 @@ The system implements a **position-tracking protocol** to ensure exactly-once de
 
 ### 4.3 Position Handling
 
-- **Initial state**: On first run, the client has no stored position. It sends `reset: true` in the first batch.
-- **Normal operation**: After a successful response, the client stores the `next_position` from the batch as the expected starting position for the next read.
-- **Read from position**: The client attempts to read journald starting from the expected position.
+- **Source of truth**: The server-side position store is the source of truth for the current expected position per `client_id`.
+- **Startup lookup**: On startup, the client requests the current expected position from the server using a dedicated position lookup endpoint (see §5.2.1).
+- **Initial state**: If the server has no stored position for the client, the client starts from head and sends `reset: true` in the first batch.
+- **Normal operation**: After a successful batch, the server stores `next_position` as the new expected position. The client does not maintain a separate persistent local position store.
+- **Read from position**: When the server returns a stored position, the client attempts to read journald starting from that position.
 - **Reset condition**: The client sends `reset: true` when:
-  - First run (no stored position).
-  - Journal was rotated or truncated; expected position is no longer valid.
-  - Server returned `expected_position` due to mismatch; client cannot resume from that position (e.g., journal history was lost).
+  - The server has no stored position for the client.
+  - Journal was rotated or truncated; the server-provided position is no longer valid.
+  - The server returned `expected_position` due to mismatch and the client cannot resume from that position (e.g., journal history was lost).
   - Configuration change that invalidates position (e.g., filter mask change).
 
 ### 4.4 Message Parsing (Optional)
@@ -110,9 +102,13 @@ Before batching, the client may parse the journal `MESSAGE` field using a config
 
 ### 4.6 HTTP Client
 
-- **Method**: POST.
-- **Content-Type**: `application/json`.
-- **Endpoint**: Configurable base URL + path (e.g., `/v1/batches`).
+- **Methods**:
+  - `GET` for startup position lookup.
+  - `POST` for batch submission.
+- **Content-Type**: `application/json` for batch submission.
+- **Endpoints**:
+  - Position lookup: `GET /v1/positions?client_id=<client_id>`
+  - Batch submit: `POST /v1/batches`
 - **Transport**: HTTPS with TLS. The client verifies the server certificate using a configurable trust store (see §9.1). For mTLS, the client presents its own certificate.
 - **Retries**: Implement retry with exponential backoff for transient failures (5xx, network errors). Do not retry on 4xx (except possibly 409 with position mismatch—see server spec).
 - **Timeout**: Configurable request timeout.
@@ -132,16 +128,46 @@ Before batching, the client may parse the journal `MESSAGE` field using a config
 
 ### 5.2 HTTP API
 
-#### 5.2.1 Endpoint
+#### 5.2.1 Endpoints
 
 ```
+GET /v1/positions?client_id=<client_id>
+
 POST /v1/batches
 Content-Type: application/json
 ```
 
 **Transport**: The server listens over TLS (HTTPS). It requires and verifies client certificates (mTLS) and validates client certificate subject fields (see §9).
 
-#### 5.2.2 Request Body Schema
+#### 5.2.2 Position Lookup Response
+
+**Success Response (200 OK, position found)**
+
+```json
+{
+  "status": "ok",
+  "current_position": "string"
+}
+```
+
+**Success Response (200 OK, no stored position)**
+
+```json
+{
+  "status": "not_found"
+}
+```
+
+**Error Response (4xx/5xx)**
+
+```json
+{
+  "status": "error",
+  "message": "string"
+}
+```
+
+#### 5.2.3 Request Body Schema
 
 ```json
 {
@@ -171,7 +197,7 @@ Content-Type: application/json
 
 **Payload rule**: Each record contains either `message` (raw) or `parsed` (extracted fields), not both. When the client's regex matches, `parsed` is sent; otherwise `message` is sent.
 
-#### 5.2.3 Success Response (200 OK)
+#### 5.2.4 Success Response (200 OK)
 
 ```json
 {
@@ -180,7 +206,7 @@ Content-Type: application/json
 }
 ```
 
-#### 5.2.4 Position Mismatch Response (409 Conflict)
+#### 5.2.5 Position Mismatch Response (409 Conflict)
 
 ```json
 {
@@ -189,7 +215,7 @@ Content-Type: application/json
 }
 ```
 
-#### 5.2.5 Error Response (4xx/5xx)
+#### 5.2.6 Error Response (4xx/5xx)
 
 ```json
 {
@@ -203,7 +229,10 @@ Content-Type: application/json
 ```
 IF request.reset == true:
   SKIP position check
-  ACCEPT batch
+  WRITE log records first
+  IF record write failed:
+    RETURN error
+    DO NOT update expected_position
   STORE request.next_position as expected_position for client_id
   RETURN 200 with next_position
 
@@ -214,9 +243,15 @@ IF request.current_position != stored expected_position for client_id:
   REJECT with 409, return expected_position
 
 ACCEPT batch
+WRITE log records first
+IF record write failed:
+  RETURN error
+  DO NOT update expected_position
 STORE request.next_position as expected_position for client_id
 RETURN 200 with next_position
 ```
+
+**Durability requirement**: The server **must write log records before updating the stored position**. This ordering is required to avoid the risk of losing records by advancing the position past data that was not successfully persisted.
 
 ### 5.4 YDB Integration
 
@@ -224,6 +259,7 @@ RETURN 200 with next_position
 - **Table schema**: Defined separately; must include columns for all required log fields plus metadata (e.g., `client_id`, `received_at`).
 - **Idempotency**: BulkUpsert is naturally idempotent for the same key. Design primary key to avoid duplicates (e.g., `client_id`, `position`, or `realtime_timestamp` + `monotonic_timestamp` + `client_id`).
 - **Batching**: Map incoming records to table rows. Add server-side metadata (timestamp, client_id) before upsert.
+- **Write ordering**: Successful record persistence must happen before position advancement. If record persistence fails, the server must not update `expected_position`.
 - **Library**: Use `github.com/ydb-platform/ydb-go-sdk/v3` or equivalent.
 
 ### 5.5 Field Mapping (Source → Destination)
@@ -264,9 +300,9 @@ field_mapping:
 
 ### 5.6 Position Storage
 
-- **Backend**: Persistent store (e.g., YDB table, Redis, or file) keyed by `client_id`.
+- **Backend**: Persistent store keyed by `client_id`. In the current design, this is a dedicated YDB table or an in-memory store for tests/local development.
 - **Value**: `expected_position` string.
-- **Update**: Atomic update on successful batch processing.
+- **Update**: Update only after successful record write. If the record write fails, do not modify the stored position.
 - **Retention**: Consider TTL or cleanup for inactive clients.
 
 ---
@@ -363,7 +399,6 @@ loglugger/
 | message_regex_no_match | string | send_raw | Behavior when regex does not match: `send_raw` (default) or `skip` |
 | batch_size | int | 1000 | Max records per batch |
 | batch_timeout | duration | 5s | Max time before flushing partial batch |
-| position_file | string | — | Path to store position (optional) |
 | http_timeout | duration | 30s | HTTP request timeout |
 | retry_max | int | 5 | Max retries on transient failure |
 | retry_base_delay | duration | 1s | Base delay for exponential backoff |
@@ -384,10 +419,10 @@ loglugger/
 | ydb_endpoint | string | — | YDB endpoint |
 | ydb_database | string | — | YDB database path |
 | ydb_table | string | logs | Target table name |
-| position_store | string | ydb | Backend for position storage (ydb, memory) |
+| position_store | string | ydb | Backend for position storage (`ydb`, `memory`) |
+| position_table | string | loglugger_positions | YDB table used to store expected position per client |
 | **Field mapping** | | | |
 | field_mapping_file | string | — | Path to YAML/JSON file with source→destination field mappings |
-| field_mapping | list | — | Inline mapping (alternative to file). Format: `[{source, destination}]` |
 | **TLS** | | | |
 | tls_cert_file | string | — | Path to server certificate (PEM) |
 | tls_key_file | string | — | Path to server private key (PEM) |
@@ -458,9 +493,9 @@ If multiple values are provided (list), the certificate subject value must match
 | Scenario | Client Behavior | Server Behavior |
 |----------|-----------------|-----------------|
 | Network partition | Retry with backoff; buffer batches in memory (bounded) | N/A |
-| Server restart | Retry; position stored on server persists | Reject until client sends matching position or reset |
-| Journal rotation | Send reset; restart from head or saved cursor | Accept with reset; update expected position |
-| YDB unavailable | Client retries; server returns 503 | Fail batch; do not update position |
+| Server restart | On startup, fetch current position from `GET /v1/positions`; then continue or reset | Position stored on server persists |
+| Journal rotation | If server-provided cursor cannot be used, send reset and restart from head | Accept with reset; update expected position |
+| YDB unavailable | Client retries; server returns 5xx | Fail batch; do not update position |
 | Duplicate batch (retry) | Client may retry same batch | Idempotent BulkUpsert; position already updated—reject with 409 if current_position no longer matches |
 
 ---
@@ -528,3 +563,4 @@ If multiple values are provided (list), the certificate subject value must match
 | 1.0 | 2025-03-13 | — | Initial specification |
 | 1.1 | 2025-03-13 | — | TLS mTLS authentication: client trust store, server client cert + subject validation |
 | 1.2 | 2025-03-13 | — | Client message regex parsing; server field mapping (source→destination) |
+| 1.3 | 2026-03-13 | — | Server-backed client startup position lookup; dedicated `GET /v1/positions`; explicit write-records-before-position-update requirement; updated configuration reference |

@@ -198,6 +198,47 @@ func TestHandler_FieldMappingParsed(t *testing.T) {
 	}
 }
 
+func TestHandler_GetPositionFound(t *testing.T) {
+	ctx := context.Background()
+	positions := NewMemoryPositionStore()
+	_ = positions.Set(ctx, "client-1", "cursor-9")
+	handler := NewHandler(positions, NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/v1/positions?client_id=client-1", nil)
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp models.PositionResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != "ok" || resp.CurrentPosition != "cursor-9" {
+		t.Fatalf("response = %+v, want ok/cursor-9", resp)
+	}
+}
+
+func TestHandler_GetPositionNotFound(t *testing.T) {
+	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/v1/positions?client_id=missing", nil)
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp models.PositionResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != "not_found" {
+		t.Fatalf("status = %q, want not_found", resp.Status)
+	}
+}
+
 func TestHandler_ContentTypeWithCharset(t *testing.T) {
 	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
 	req := &models.BatchRequest{
