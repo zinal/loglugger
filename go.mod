@@ -4,8 +4,8 @@ go 1.23.9
 
 require (
 	github.com/coreos/go-systemd/v22 v22.5.0
-	github.com/ydb-platform/ydb-go-sdk/v3 v3.127.2
-	github.com/ydb-platform/ydb-go-yc v0.12.1
+	github.com/ydb-platform/ydb-go-sdk/v3 v3.127.3
+	github.com/ydb-platform/ydb-go-yc v0.12.3
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -13,8 +13,8 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
-	github.com/yandex-cloud/go-genproto v0.0.0-20211115083454-9ca41db5ed9e // indirect
-	github.com/ydb-platform/ydb-go-genproto v0.0.0-20251125145508-6d7ef87db5cb // indirect
+	github.com/yandex-cloud/go-genproto v0.61.0 // indirect
+	github.com/ydb-platform/ydb-go-genproto v0.0.0-20260311095541-ebbf792c1180 // indirect
 	github.com/ydb-platform/ydb-go-yc-metadata v0.6.1 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
