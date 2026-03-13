@@ -116,7 +116,7 @@ func TestBuildClientTLSConfigRejectsNonHTTPS(t *testing.T) {
 
 func TestBuildClientTLSConfigSetsServerNameFromURLHost(t *testing.T) {
 	tlsCfg, err := buildClientTLSConfig(clientConfig{
-		ServerURLs:       []string{"https://localhost:8443"},
+		ServerURLs:       []string{"https://localhost:27312"},
 		TLSUseSystemPool: true,
 	})
 	if err != nil {
@@ -138,8 +138,8 @@ func TestBuildClientTLSConfigRejectsMissingHost(t *testing.T) {
 }
 
 func TestParseServerURLs(t *testing.T) {
-	got := parseServerURLs(" https://a:8443,https://b:8443 , , https://c:8443 ")
-	want := []string{"https://a:8443", "https://b:8443", "https://c:8443"}
+	got := parseServerURLs(" https://a:27312,https://b:27312 , , https://c:27312 ")
+	want := []string{"https://a:27312", "https://b:27312", "https://c:27312"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseServerURLs() = %v, want %v", got, want)
 	}
@@ -156,10 +156,10 @@ func TestParseClientConfigParsesServerList(t *testing.T) {
 
 	os.Args = []string{
 		"client",
-		"-server", "https://a:8443,https://b:8443",
+		"-server", "https://a:27312,https://b:27312",
 	}
 	cfg := parseClientConfig()
-	want := []string{"https://a:8443", "https://b:8443"}
+	want := []string{"https://a:27312", "https://b:27312"}
 	if !reflect.DeepEqual(cfg.ServerURLs, want) {
 		t.Fatalf("ServerURLs = %v, want %v", cfg.ServerURLs, want)
 	}

@@ -31,13 +31,13 @@ Server config file:
 
 - Most server settings are now loaded from YAML/JSON config passed with `-config`.
 - See `examples/config/server.yaml` for all supported keys.
-- Optional CLI override: `-listen :8443` (overrides `listen_addr` from config).
+- Optional CLI override: `-listen :27312` (overrides `listen_addr` from config).
 - The client fetches its startup position from `GET /v1/positions?client_id=...` and does not keep a local position file.
 
 **Client** (Linux only):
 ```bash
 ./bin/client \
-  -server https://localhost:8443 \
+  -server https://localhost:27312 \
   -client-id myhost \
   -tls-ca-file certs/ca.crt \
   -tls-cert-file certs/client.crt \
@@ -49,7 +49,7 @@ Useful client flags:
 - `-service-mask nginx.service` uses exact systemd unit matching.
 - `-service-mask 'nginx*.service'` uses glob matching.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
-- `-server https://a:8443,https://b:8443` configures multiple endpoints; client uses sticky endpoint selection and switches to the next endpoint only after transient failure (`5xx` or network error).
+- `-server https://a:27312,https://b:27312` configures multiple endpoints; client uses sticky endpoint selection and switches to the next endpoint only after transient failure (`5xx` or network error).
 - `-message-regex` and `-message-regex-no-match send_raw|skip` control MESSAGE parsing.
 - `-tls-ca-path` and `-tls-use-system-pool` control the client trust store.
 - Client batches are additionally limited to 10 MB of uncompressed log data per request.
@@ -105,7 +105,7 @@ For a local mock-backed end-to-end run:
 
 ```bash
 ./bin/client \
-  -server https://localhost:8443 \
+  -server https://localhost:27312 \
   -client-id myhost \
   -tls-ca-file certs/ca.crt \
   -tls-cert-file certs/client.crt \
@@ -131,6 +131,10 @@ Supported YDB auth modes:
 - `static` via `ydb_auth_login` + `ydb_auth_password`
 - `service-account-key` via `ydb_auth_sa_key_file`
 - `metadata` (instance metadata credentials, optional `ydb_auth_metadata_url`)
+
+Optional YDB TLS CA certificate path:
+
+- `ydb_ca_path` points to a PEM file with CA certificates used to validate YDB TLS.
 
 Create the YDB table for the position store before starting the server with `position_store: ydb`:
 

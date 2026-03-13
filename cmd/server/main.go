@@ -26,6 +26,7 @@ type serverConfig struct {
 	YDBAuthPassword      string   `json:"ydb_auth_password" yaml:"ydb_auth_password"`
 	YDBAuthSACredentials string   `json:"ydb_auth_sa_key_file" yaml:"ydb_auth_sa_key_file"`
 	YDBAuthMetadataURL   string   `json:"ydb_auth_metadata_url" yaml:"ydb_auth_metadata_url"`
+	YDBCAPath            string   `json:"ydb_ca_path" yaml:"ydb_ca_path"`
 	PositionStoreBackend string   `json:"position_store" yaml:"position_store"`
 	PositionTable        string   `json:"position_table" yaml:"position_table"`
 	FieldMappingFile     string   `json:"field_mapping_file" yaml:"field_mapping_file"`
@@ -129,7 +130,7 @@ func parseServerConfig() (serverConfig, error) {
 
 func defaultServerConfig() serverConfig {
 	return serverConfig{
-		ListenAddr:           ":8443",
+		ListenAddr:           ":27312",
 		WriterBackend:        "mock",
 		YDBTable:             "logs",
 		YDBAuthMode:          "anonymous",
@@ -210,6 +211,7 @@ func ydbAuthConfig(cfg serverConfig) server.YDBAuthOptions {
 		Password:              cfg.YDBAuthPassword,
 		ServiceAccountKeyFile: cfg.YDBAuthSACredentials,
 		MetadataURL:           cfg.YDBAuthMetadataURL,
+		CACertPath:            strings.TrimSpace(cfg.YDBCAPath),
 	}
 }
 

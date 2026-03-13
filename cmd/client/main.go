@@ -143,7 +143,7 @@ func main() {
 
 func parseClientConfig() clientConfig {
 	cfg := clientConfig{}
-	serverList := flag.String("server", "https://localhost:8443", "Server URL or comma-separated server URLs")
+	serverList := flag.String("server", "https://localhost:27312", "Server URL or comma-separated server URLs")
 	flag.StringVar(&cfg.ClientID, "client-id", "", "Client ID (default: hostname)")
 	flag.StringVar(&cfg.ServiceMask, "service-mask", "", "Filter for _SYSTEMD_UNIT")
 	flag.StringVar(&cfg.MessageRegex, "message-regex", "", "Regex to parse MESSAGE (named groups)")

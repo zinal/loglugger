@@ -425,7 +425,7 @@ loglugger/
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | config_file | string | — | Path to server YAML/JSON configuration file passed via `-config` |
-| listen_addr | string | :8443 | HTTPS listen address |
+| listen_addr | string | :27312 | HTTPS listen address |
 | writer_backend | string | mock | Output backend (`mock`, `ydb`) |
 | ydb_endpoint | string | — | YDB endpoint |
 | ydb_database | string | — | YDB database path |
@@ -435,6 +435,7 @@ loglugger/
 | ydb_auth_password | string | — | Password for `static` auth mode |
 | ydb_auth_sa_key_file | string | — | Path to service account key file for `service-account-key` auth mode |
 | ydb_auth_metadata_url | string | — | Optional metadata endpoint URL override for `metadata` auth mode |
+| ydb_ca_path | string | — | Optional path to PEM file with CA certificates for YDB TLS verification |
 | position_store | string | memory | Backend for position storage (`ydb`, `memory`) |
 | position_table | string | loglugger_positions | YDB table used to store expected position per client |
 | **Field mapping** | | | |

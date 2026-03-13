@@ -1,0 +1,40 @@
+field_mapping:
+  # Always present identity/timestamps (position-friendly and good PK candidates)
+  - source: client_id
+    destination: client_id
+  - source: realtime_timestamp
+    destination: ts_epoch_us
+    transform: int64
+  - source: monotonic_timestamp
+    destination: monotonic_ts
+    transform: uint64
+
+  # Parsed fields from message regex groups.
+  - source: parsed.P_DTTM
+    destination: ts_orig
+  - source: parsed.P_SERVICE
+    destination: service
+    default: unknown
+  - source: parsed.P_LEVEL
+    destination: level
+    default: unknown
+
+  # Keep raw `message`, overwrite with parsed value when present.
+  - source: message
+    destination: msg
+  - source: parsed.P_MESSAGE
+    destination: msg
+
+  # Systemd metadata available from journald entry.
+  - source: fields._HOSTNAME
+    destination: hostname
+  - source: systemd_unit
+    destination: unit
+
+  # Static metadata fields.
+  - source: parsed.__STATIC_INPUT
+    destination: input
+    default: systemd
+  - source: parsed.__STATIC_DB
+    destination: dbname
+    default: "/Unknown"

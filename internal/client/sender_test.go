@@ -219,7 +219,7 @@ func TestSenderCurrentPositionKeepsEndpointOnSuccess(t *testing.T) {
 
 func TestSenderSetsTLSHostPerEndpoint(t *testing.T) {
 	s := NewSender(SenderConfig{
-		ServerURLs:  []string{"https://host-a.example:8443", "https://host-b.example:9443"},
+		ServerURLs:  []string{"https://host-a.example:27312", "https://host-b.example:9443"},
 		ClientID:    "client-1",
 		HTTPTimeout: time.Second,
 		RetryDelay:  time.Millisecond,

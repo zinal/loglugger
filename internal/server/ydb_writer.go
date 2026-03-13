@@ -24,6 +24,7 @@ type YDBAuthOptions struct {
 	Password              string
 	ServiceAccountKeyFile string
 	MetadataURL           string
+	CACertPath            string
 }
 
 // NewYDBWriter connects to YDB.
@@ -149,7 +150,14 @@ func openYDBDriver(ctx context.Context, endpoint, database string, auth YDBAuthO
 	if err != nil {
 		return nil, err
 	}
-	driver, err := ydb.Open(ctx, endpoint, ydb.WithDatabase(database), authOption)
+	opts := []ydb.Option{
+		ydb.WithDatabase(database),
+		authOption,
+	}
+	if caPath := strings.TrimSpace(auth.CACertPath); caPath != "" {
+		opts = append(opts, ydb.WithCertificatesFromFile(caPath))
+	}
+	driver, err := ydb.Open(ctx, endpoint, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("open ydb connection: %w", err)
 	}
