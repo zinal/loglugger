@@ -2,9 +2,11 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -327,6 +329,66 @@ func TestHandler_RejectsRecordWithoutMessageOrParsed(t *testing.T) {
 	if resp.Status != "error" {
 		t.Fatalf("status = %q, want error", resp.Status)
 	}
+}
+
+func TestHandler_AcceptsGzipEncodedBatch(t *testing.T) {
+	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	req := &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "pos-1",
+		Records:      []models.Record{{Message: "hello"}},
+	}
+	raw, _ := json.Marshal(req)
+	compressed := gzipData(t, raw)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(compressed))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Content-Encoding", "gzip")
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestHandler_RejectsUnsupportedContentEncoding(t *testing.T) {
+	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	req := &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "pos-1",
+		Records:      []models.Record{{Message: "hello"}},
+	}
+	body, _ := json.Marshal(req)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Content-Encoding", "br")
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func gzipData(t *testing.T, in []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(in); err != nil {
+		t.Fatalf("gzip write failed: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close failed: %v", err)
+	}
+	out, err := io.ReadAll(&buf)
+	if err != nil {
+		t.Fatalf("read compressed buffer failed: %v", err)
+	}
+	return out
 }
 
 type errorWriter struct{ err error }

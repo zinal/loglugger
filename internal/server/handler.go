@@ -1,11 +1,14 @@
 package server
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
+	"strings"
 
 	"github.com/ydb-platform/loglugger/internal/models"
 )
@@ -50,15 +53,36 @@ func (h *Handler) serveBatch(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "Content-Type must be application/json")
 		return
 	}
+	body, closeFn, err := decodeRequestBody(r)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	defer closeFn()
 
 	var req models.BatchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 
 	resp := h.handle(r.Context(), &req)
 	h.writeResponse(w, resp)
+}
+
+func decodeRequestBody(r *http.Request) (io.Reader, func(), error) {
+	encoding := strings.TrimSpace(r.Header.Get("Content-Encoding"))
+	if encoding == "" || strings.EqualFold(encoding, "identity") {
+		return r.Body, func() {}, nil
+	}
+	if strings.EqualFold(encoding, "gzip") {
+		gz, err := gzip.NewReader(r.Body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid gzip body: %w", err)
+		}
+		return gz, func() { _ = gz.Close() }, nil
+	}
+	return nil, nil, fmt.Errorf("unsupported Content-Encoding %q", encoding)
 }
 
 func (h *Handler) handlePosition(ctx context.Context, clientID string) *models.PositionResponse {

@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -67,6 +68,10 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
+	compressedBody, err := compressJSON(body)
+	if err != nil {
+		return nil, fmt.Errorf("compress request: %w", err)
+	}
 
 	var lastErr error
 	for attempt := 0; attempt <= s.retryMax; attempt++ {
@@ -78,11 +83,12 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 			}
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.batchesURL, bytes.NewReader(body))
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.batchesURL, bytes.NewReader(compressedBody))
 		if err != nil {
 			return nil, err
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Content-Encoding", "gzip")
 
 		resp, err := s.client.Do(httpReq)
 		if err != nil {
@@ -115,6 +121,19 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 		}
 	}
 	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
+func compressJSON(body []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(body); err != nil {
+		_ = zw.Close()
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse, error) {

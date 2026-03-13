@@ -553,14 +553,3 @@ If multiple values are provided (list), the certificate subject value must match
   ]
 }
 ```
-
----
-
-## 12. Revision History
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2025-03-13 | — | Initial specification |
-| 1.1 | 2025-03-13 | — | TLS mTLS authentication: client trust store, server client cert + subject validation |
-| 1.2 | 2025-03-13 | — | Client message regex parsing; server field mapping (source→destination) |
-| 1.3 | 2026-03-13 | — | Server-backed client startup position lookup; dedicated `GET /v1/positions`; explicit write-records-before-position-update requirement; updated configuration reference |
