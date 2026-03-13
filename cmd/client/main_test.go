@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"flag"
+	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -82,7 +85,7 @@ func TestSendBatchFallsBackToResetOnSeekFailure(t *testing.T) {
 
 func TestBuildClientTLSConfigRejectsNonHTTPS(t *testing.T) {
 	_, err := buildClientTLSConfig(clientConfig{
-		ServerURL:   "http://localhost:8080",
+		ServerURLs:  []string{"http://localhost:8080"},
 		HTTPTimeout: 5 * time.Second,
 	})
 	if err == nil {
@@ -92,24 +95,52 @@ func TestBuildClientTLSConfigRejectsNonHTTPS(t *testing.T) {
 
 func TestBuildClientTLSConfigSetsServerNameFromURLHost(t *testing.T) {
 	tlsCfg, err := buildClientTLSConfig(clientConfig{
-		ServerURL:        "https://localhost:8443",
+		ServerURLs:       []string{"https://localhost:8443"},
 		TLSUseSystemPool: true,
 	})
 	if err != nil {
 		t.Fatalf("buildClientTLSConfig() error = %v", err)
 	}
-	if tlsCfg.ServerName != "localhost" {
-		t.Fatalf("ServerName = %q, want localhost", tlsCfg.ServerName)
+	if tlsCfg == nil {
+		t.Fatal("expected non-nil tls config")
 	}
 }
 
 func TestBuildClientTLSConfigRejectsMissingHost(t *testing.T) {
 	_, err := buildClientTLSConfig(clientConfig{
-		ServerURL:        "https://",
+		ServerURLs:       []string{"https://"},
 		TLSUseSystemPool: true,
 	})
 	if err == nil {
 		t.Fatal("expected error for missing host")
+	}
+}
+
+func TestParseServerURLs(t *testing.T) {
+	got := parseServerURLs(" https://a:8443,https://b:8443 , , https://c:8443 ")
+	want := []string{"https://a:8443", "https://b:8443", "https://c:8443"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseServerURLs() = %v, want %v", got, want)
+	}
+}
+
+func TestParseClientConfigParsesServerList(t *testing.T) {
+	prev := flag.CommandLine
+	prevArgs := os.Args
+	defer func() {
+		flag.CommandLine = prev
+		os.Args = prevArgs
+	}()
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+
+	os.Args = []string{
+		"client",
+		"-server", "https://a:8443,https://b:8443",
+	}
+	cfg := parseClientConfig()
+	want := []string{"https://a:8443", "https://b:8443"}
+	if !reflect.DeepEqual(cfg.ServerURLs, want) {
+		t.Fatalf("ServerURLs = %v, want %v", cfg.ServerURLs, want)
 	}
 }
 

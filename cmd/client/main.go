@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 )
 
 type clientConfig struct {
-	ServerURL        string
+	ServerURLs       []string
 	ClientID         string
 	ServiceMask      string
 	MessageRegex     string
@@ -67,7 +68,7 @@ func main() {
 
 	batcher := client.NewBatcher(cfg.BatchSize, cfg.BatchTimeout)
 	sender := client.NewSender(client.SenderConfig{
-		ServerURL:   cfg.ServerURL,
+		ServerURLs:  cfg.ServerURLs,
 		ClientID:    cfg.ClientID,
 		HTTPTimeout: cfg.HTTPTimeout,
 		RetryMax:    cfg.RetryMax,
@@ -143,7 +144,7 @@ func main() {
 
 func parseClientConfig() clientConfig {
 	cfg := clientConfig{}
-	flag.StringVar(&cfg.ServerURL, "server", "https://localhost:8443", "Server URL")
+	serverList := flag.String("server", "https://localhost:8443", "Server URL or comma-separated server URLs")
 	flag.StringVar(&cfg.ClientID, "client-id", "", "Client ID (default: hostname)")
 	flag.StringVar(&cfg.ServiceMask, "service-mask", "", "Filter for _SYSTEMD_UNIT")
 	flag.StringVar(&cfg.MessageRegex, "message-regex", "", "Regex to parse MESSAGE (named groups)")
@@ -160,27 +161,44 @@ func parseClientConfig() clientConfig {
 	flag.BoolVar(&cfg.TLSUseSystemPool, "tls-use-system-pool", false, "Use system CA pool")
 	flag.Parse()
 	cfg.NoMatchAction = client.NoMatchAction(*noMatch)
+	cfg.ServerURLs = parseServerURLs(*serverList)
 	return cfg
 }
 
 func buildClientTLSConfig(cfg clientConfig) (*tls.Config, error) {
-	serverURL, err := url.Parse(cfg.ServerURL)
-	if err != nil {
-		return nil, err
+	if len(cfg.ServerURLs) == 0 {
+		return nil, fmt.Errorf("at least one server URL is required")
 	}
-	if serverURL.Scheme != "https" {
-		return nil, fmt.Errorf("server URL must use https")
-	}
-	serverName := serverURL.Hostname()
-	if serverName == "" {
-		return nil, fmt.Errorf("server URL must include host name")
+	for _, raw := range cfg.ServerURLs {
+		serverURL, err := url.Parse(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid server URL %q: %w", raw, err)
+		}
+		if serverURL.Scheme != "https" {
+			return nil, fmt.Errorf("server URL must use https: %q", raw)
+		}
+		if serverURL.Hostname() == "" {
+			return nil, fmt.Errorf("server URL must include host name: %q", raw)
+		}
 	}
 	tlsCfg, err := client.LoadClientTLSConfig(cfg.TLSCAFile, cfg.TLSCAPath, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSUseSystemPool)
 	if err != nil {
 		return nil, err
 	}
-	tlsCfg.ServerName = serverName
 	return tlsCfg, nil
+}
+
+func parseServerURLs(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bool) {

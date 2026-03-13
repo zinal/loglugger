@@ -10,6 +10,7 @@ import (
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
+	yc "github.com/ydb-platform/ydb-go-yc"
 )
 
 // YDBWriter writes rows to a YDB table via BulkUpsert.
@@ -17,9 +18,17 @@ type YDBWriter struct {
 	driver *ydb.Driver
 }
 
+type YDBAuthOptions struct {
+	Mode                  string
+	Login                 string
+	Password              string
+	ServiceAccountKeyFile string
+	MetadataURL           string
+}
+
 // NewYDBWriter connects to YDB.
-func NewYDBWriter(ctx context.Context, endpoint, database string) (*YDBWriter, error) {
-	driver, err := openYDBDriver(ctx, endpoint, database)
+func NewYDBWriter(ctx context.Context, endpoint, database string, auth YDBAuthOptions) (*YDBWriter, error) {
+	driver, err := openYDBDriver(ctx, endpoint, database, auth)
 	if err != nil {
 		return nil, err
 	}
@@ -129,16 +138,48 @@ func encodeYDBValue(value interface{}) (types.Value, error) {
 	}
 }
 
-func openYDBDriver(ctx context.Context, endpoint, database string) (*ydb.Driver, error) {
+func openYDBDriver(ctx context.Context, endpoint, database string, auth YDBAuthOptions) (*ydb.Driver, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("ydb endpoint is required")
 	}
 	if database == "" {
 		return nil, fmt.Errorf("ydb database is required")
 	}
-	driver, err := ydb.Open(ctx, endpoint, ydb.WithDatabase(database), ydb.WithAnonymousCredentials())
+	authOption, err := ydbAuthOption(auth)
+	if err != nil {
+		return nil, err
+	}
+	driver, err := ydb.Open(ctx, endpoint, ydb.WithDatabase(database), authOption)
 	if err != nil {
 		return nil, fmt.Errorf("open ydb connection: %w", err)
 	}
 	return driver, nil
+}
+
+func ydbAuthOption(auth YDBAuthOptions) (ydb.Option, error) {
+	mode := strings.ToLower(strings.TrimSpace(auth.Mode))
+	switch mode {
+	case "", "anonymous":
+		return ydb.WithAnonymousCredentials(), nil
+	case "static":
+		if strings.TrimSpace(auth.Login) == "" {
+			return nil, fmt.Errorf("ydb static auth login is required")
+		}
+		if strings.TrimSpace(auth.Password) == "" {
+			return nil, fmt.Errorf("ydb static auth password is required")
+		}
+		return ydb.WithStaticCredentials(auth.Login, auth.Password), nil
+	case "service-account-key", "service_account_key", "sa-key":
+		if strings.TrimSpace(auth.ServiceAccountKeyFile) == "" {
+			return nil, fmt.Errorf("ydb service account key file is required")
+		}
+		return yc.WithServiceAccountKeyFileCredentials(auth.ServiceAccountKeyFile), nil
+	case "metadata":
+		if strings.TrimSpace(auth.MetadataURL) != "" {
+			return yc.WithMetadataCredentialsURL(auth.MetadataURL), nil
+		}
+		return yc.WithMetadataCredentials(), nil
+	default:
+		return nil, fmt.Errorf("unsupported ydb auth mode %q", auth.Mode)
+	}
 }

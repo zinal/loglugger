@@ -25,21 +25,14 @@ After building, use `./bin/server` and `./bin/client` in the run commands below.
 
 **Server** (TLS + mTLS required):
 ```bash
-./bin/server \
-  -listen :8443 \
-  -tls-cert-file certs/server.crt \
-  -tls-key-file certs/server.key \
-  -tls-ca-file certs/ca.crt \
-  -field-mapping-file examples/mappings/basic.yaml
+./bin/server -config examples/config/server.yaml
 ```
 
-Useful server flags:
+Server config file:
 
-- `-writer mock|ydb` chooses the output backend.
-- `-position-store memory|ydb` chooses in-memory or YDB-backed position tracking.
-- `-position-table loglugger_positions` sets the YDB table used to persist expected client positions.
-- `-field-mapping-file mapping.yaml` loads YAML/JSON source-to-destination mappings.
-- `-tls-client-subject-cn`, `-tls-client-subject-o`, `-tls-client-subject-ou` restrict accepted client certificate subjects.
+- Most server settings are now loaded from YAML/JSON config passed with `-config`.
+- See `examples/config/server.yaml` for all supported keys.
+- Optional CLI override: `-listen :8443` (overrides `listen_addr` from config).
 - The client fetches its startup position from `GET /v1/positions?client_id=...` and does not keep a local position file.
 
 **Client** (Linux only):
@@ -57,6 +50,7 @@ Useful client flags:
 - `-service-mask nginx.service` uses exact systemd unit matching.
 - `-service-mask 'nginx*.service'` uses glob matching.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
+- `-server https://a:8443,https://b:8443` configures multiple endpoints; retries rotate through the list.
 - `-message-regex` and `-message-regex-no-match send_raw|skip` control MESSAGE parsing.
 - `-tls-ca-path` and `-tls-use-system-pool` control the client trust store.
 - Client batches are additionally limited to 10 MB of uncompressed log data per request.
@@ -101,30 +95,13 @@ openssl x509 -req -in certs/client.csr \
 If you want the server to enforce client subject checks as well as CA trust, start it with:
 
 ```bash
-./bin/server \
-  -listen :8443 \
-  -tls-cert-file certs/server.crt \
-  -tls-key-file certs/server.key \
-  -tls-ca-file certs/ca.crt \
-  -tls-client-subject-cn client-local \
-  -tls-client-subject-o dev \
-  -tls-client-subject-ou local \
-  -field-mapping-file examples/mappings/basic.yaml \
-  -position-store ydb \
-  -ydb-endpoint grpcs://localhost:2135 \
-  -ydb-database /local \
-  -position-table loglugger_positions
+./bin/server -config examples/config/server.yaml
 ```
 
 For a local mock-backed end-to-end run:
 
 ```bash
-./bin/server \
-  -listen :8443 \
-  -tls-cert-file certs/server.crt \
-  -tls-key-file certs/server.key \
-  -tls-ca-file certs/ca.crt \
-  -field-mapping-file examples/mappings/basic.yaml
+./bin/server -config examples/config/server.yaml
 ```
 
 ```bash
@@ -147,9 +124,16 @@ Includes unit tests for parser, batcher, models, handler, and a functional test 
 
 ## YDB Integration
 
-The server supports `-writer ydb` and uses `github.com/ydb-platform/ydb-go-sdk/v3` for `BulkUpsert`. Supply `-ydb-endpoint`, `-ydb-database`, and `-ydb-table` when enabling the YDB backend. The position store can also use YDB via `-position-store ydb` and `-position-table`. `MockWriter` remains available for tests and local dry runs.
+The server supports `writer_backend: ydb` and uses `github.com/ydb-platform/ydb-go-sdk/v3` for `BulkUpsert`. Supply `ydb_endpoint`, `ydb_database`, and `ydb_table` in the config when enabling the YDB backend. The position store can also use YDB via `position_store: ydb` and `position_table`. `MockWriter` remains available for tests and local dry runs.
 
-Create the YDB table for the position store before starting the server with `-position-store ydb`:
+Supported YDB auth modes:
+
+- `anonymous` (default)
+- `static` via `ydb_auth_login` + `ydb_auth_password`
+- `service-account-key` via `ydb_auth_sa_key_file`
+- `metadata` (instance metadata credentials, optional `ydb_auth_metadata_url`)
+
+Create the YDB table for the position store before starting the server with `position_store: ydb`:
 
 ```sql
 CREATE TABLE `loglugger_positions` (
@@ -162,16 +146,12 @@ CREATE TABLE `loglugger_positions` (
 Example YDB run:
 
 ```bash
-./bin/server \
-  -listen :8443 \
-  -writer ydb \
-  -ydb-endpoint grpcs://localhost:2135 \
-  -ydb-database /local \
-  -ydb-table logs \
-  -tls-cert-file certs/server.crt \
-  -tls-key-file certs/server.key \
-  -tls-ca-file certs/ca.crt \
-  -field-mapping-file examples/mappings/ydb.json \
-  -position-store ydb \
-  -position-table loglugger_positions
+# copy examples/config/server.yaml and set:
+# writer_backend: ydb
+# position_store: ydb
+# ydb_endpoint: grpcs://localhost:2135
+# ydb_database: /local
+# ydb_table: logs
+# field_mapping_file: examples/mappings/ydb.json
+./bin/server -config examples/config/server.yaml
 ```

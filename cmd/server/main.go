@@ -2,36 +2,48 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ydb-platform/loglugger/internal/server"
+	"gopkg.in/yaml.v3"
 )
 
 type serverConfig struct {
-	ListenAddr           string
-	WriterBackend        string
-	YDBEndpoint          string
-	YDBDatabase          string
-	YDBTable             string
-	PositionStoreBackend string
-	PositionTable        string
-	FieldMappingFile     string
-	TLSCertFile          string
-	TLSKeyFile           string
-	TLSCAFile            string
-	TLSCAPath            string
-	TLSClientSubjectCN   string
-	TLSClientSubjectO    string
-	TLSClientSubjectOU   string
+	ListenAddr           string   `json:"listen_addr" yaml:"listen_addr"`
+	WriterBackend        string   `json:"writer_backend" yaml:"writer_backend"`
+	YDBEndpoint          string   `json:"ydb_endpoint" yaml:"ydb_endpoint"`
+	YDBDatabase          string   `json:"ydb_database" yaml:"ydb_database"`
+	YDBTable             string   `json:"ydb_table" yaml:"ydb_table"`
+	YDBAuthMode          string   `json:"ydb_auth_mode" yaml:"ydb_auth_mode"`
+	YDBAuthLogin         string   `json:"ydb_auth_login" yaml:"ydb_auth_login"`
+	YDBAuthPassword      string   `json:"ydb_auth_password" yaml:"ydb_auth_password"`
+	YDBAuthSACredentials string   `json:"ydb_auth_sa_key_file" yaml:"ydb_auth_sa_key_file"`
+	YDBAuthMetadataURL   string   `json:"ydb_auth_metadata_url" yaml:"ydb_auth_metadata_url"`
+	PositionStoreBackend string   `json:"position_store" yaml:"position_store"`
+	PositionTable        string   `json:"position_table" yaml:"position_table"`
+	FieldMappingFile     string   `json:"field_mapping_file" yaml:"field_mapping_file"`
+	TLSCertFile          string   `json:"tls_cert_file" yaml:"tls_cert_file"`
+	TLSKeyFile           string   `json:"tls_key_file" yaml:"tls_key_file"`
+	TLSCAFile            string   `json:"tls_ca_file" yaml:"tls_ca_file"`
+	TLSCAPath            string   `json:"tls_ca_path" yaml:"tls_ca_path"`
+	TLSClientSubjectCN   []string `json:"tls_client_subject_cn" yaml:"tls_client_subject_cn"`
+	TLSClientSubjectO    []string `json:"tls_client_subject_o" yaml:"tls_client_subject_o"`
+	TLSClientSubjectOU   []string `json:"tls_client_subject_ou" yaml:"tls_client_subject_ou"`
 }
 
 func main() {
-	cfg := parseServerConfig()
+	cfg, err := parseServerConfig()
+	if err != nil {
+		slog.Error("parse server config", "error", err)
+		os.Exit(1)
+	}
 
 	mappings, err := loadMappings(cfg)
 	if err != nil {
@@ -74,9 +86,9 @@ func main() {
 		KeyFile:   cfg.TLSKeyFile,
 		CAFile:    cfg.TLSCAFile,
 		CAPath:    cfg.TLSCAPath,
-		AllowedCN: parseCSVList(cfg.TLSClientSubjectCN),
-		AllowedO:  parseCSVList(cfg.TLSClientSubjectO),
-		AllowedOU: parseCSVList(cfg.TLSClientSubjectOU),
+		AllowedCN: cfg.TLSClientSubjectCN,
+		AllowedO:  cfg.TLSClientSubjectO,
+		AllowedOU: cfg.TLSClientSubjectOU,
 	})
 	if err != nil {
 		slog.Error("load TLS config", "error", err)
@@ -96,25 +108,53 @@ func main() {
 	}
 }
 
-func parseServerConfig() serverConfig {
-	cfg := serverConfig{}
-	flag.StringVar(&cfg.ListenAddr, "listen", ":8443", "Listen address")
-	flag.StringVar(&cfg.WriterBackend, "writer", "mock", "Writer backend: mock or ydb")
-	flag.StringVar(&cfg.YDBEndpoint, "ydb-endpoint", "", "YDB endpoint")
-	flag.StringVar(&cfg.YDBDatabase, "ydb-database", "", "YDB database path")
-	flag.StringVar(&cfg.YDBTable, "ydb-table", "logs", "YDB table name")
-	flag.StringVar(&cfg.PositionStoreBackend, "position-store", "memory", "Position store backend: memory or ydb")
-	flag.StringVar(&cfg.PositionTable, "position-table", "loglugger_positions", "YDB table name for stored client positions")
-	flag.StringVar(&cfg.FieldMappingFile, "field-mapping-file", "", "Path to YAML or JSON field mapping file")
-	flag.StringVar(&cfg.TLSCertFile, "tls-cert-file", "", "Server certificate file")
-	flag.StringVar(&cfg.TLSKeyFile, "tls-key-file", "", "Server private key file")
-	flag.StringVar(&cfg.TLSCAFile, "tls-ca-file", "", "Client CA certificate file")
-	flag.StringVar(&cfg.TLSCAPath, "tls-ca-path", "", "Client CA certificate directory")
-	flag.StringVar(&cfg.TLSClientSubjectCN, "tls-client-subject-cn", "", "Allowed client certificate common names (comma-separated)")
-	flag.StringVar(&cfg.TLSClientSubjectO, "tls-client-subject-o", "", "Allowed client certificate organizations (comma-separated)")
-	flag.StringVar(&cfg.TLSClientSubjectOU, "tls-client-subject-ou", "", "Allowed client certificate organizational units (comma-separated)")
+func parseServerConfig() (serverConfig, error) {
+	configPath := flag.String("config", "", "Path to server YAML/JSON config file")
+	listenOverride := flag.String("listen", "", "Optional listen address override")
 	flag.Parse()
-	return cfg
+
+	if strings.TrimSpace(*configPath) == "" {
+		return serverConfig{}, fmt.Errorf("config file is required (-config)")
+	}
+
+	cfg := defaultServerConfig()
+	if err := loadServerConfigFile(*configPath, &cfg); err != nil {
+		return serverConfig{}, err
+	}
+	if strings.TrimSpace(*listenOverride) != "" {
+		cfg.ListenAddr = strings.TrimSpace(*listenOverride)
+	}
+	return cfg, nil
+}
+
+func defaultServerConfig() serverConfig {
+	return serverConfig{
+		ListenAddr:           ":8443",
+		WriterBackend:        "mock",
+		YDBTable:             "logs",
+		YDBAuthMode:          "anonymous",
+		PositionStoreBackend: "memory",
+		PositionTable:        "loglugger_positions",
+	}
+}
+
+func loadServerConfigFile(path string, cfg *serverConfig) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read config file: %w", err)
+	}
+
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".json":
+		if err := json.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("decode JSON config file: %w", err)
+		}
+	default:
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("decode YAML config file: %w", err)
+		}
+	}
+	return nil
 }
 
 func loadMappings(cfg serverConfig) ([]server.FieldMapping, error) {
@@ -140,7 +180,13 @@ func newPositionStore(cfg serverConfig) (server.PositionStore, error) {
 	case "memory":
 		return server.NewMemoryPositionStore(), nil
 	case "ydb":
-		return server.NewYDBPositionStore(context.Background(), cfg.YDBEndpoint, cfg.YDBDatabase, fullTablePath(cfg.YDBDatabase, cfg.PositionTable))
+		return server.NewYDBPositionStore(
+			context.Background(),
+			cfg.YDBEndpoint,
+			cfg.YDBDatabase,
+			fullTablePath(cfg.YDBDatabase, cfg.PositionTable),
+			ydbAuthConfig(cfg),
+		)
 	default:
 		return nil, fmt.Errorf("unsupported position store backend %q", cfg.PositionStoreBackend)
 	}
@@ -151,25 +197,20 @@ func newWriter(cfg serverConfig) (server.Writer, error) {
 	case "mock":
 		return server.NewMockWriter(), nil
 	case "ydb":
-		return server.NewYDBWriter(context.Background(), cfg.YDBEndpoint, cfg.YDBDatabase)
+		return server.NewYDBWriter(context.Background(), cfg.YDBEndpoint, cfg.YDBDatabase, ydbAuthConfig(cfg))
 	default:
 		return nil, fmt.Errorf("unsupported writer backend %q", cfg.WriterBackend)
 	}
 }
 
-func parseCSVList(value string) []string {
-	if strings.TrimSpace(value) == "" {
-		return nil
+func ydbAuthConfig(cfg serverConfig) server.YDBAuthOptions {
+	return server.YDBAuthOptions{
+		Mode:                  cfg.YDBAuthMode,
+		Login:                 cfg.YDBAuthLogin,
+		Password:              cfg.YDBAuthPassword,
+		ServiceAccountKeyFile: cfg.YDBAuthSACredentials,
+		MetadataURL:           cfg.YDBAuthMetadataURL,
 	}
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
 }
 
 func fullTablePath(database, table string) string {

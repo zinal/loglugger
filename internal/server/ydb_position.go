@@ -16,8 +16,8 @@ type YDBPositionStore struct {
 }
 
 // NewYDBPositionStore creates a YDB-backed position store.
-func NewYDBPositionStore(ctx context.Context, endpoint, database, tablePath string) (*YDBPositionStore, error) {
-	driver, err := openYDBDriver(ctx, endpoint, database)
+func NewYDBPositionStore(ctx context.Context, endpoint, database, tablePath string, auth YDBAuthOptions) (*YDBPositionStore, error) {
+	driver, err := openYDBDriver(ctx, endpoint, database, auth)
 	if err != nil {
 		return nil, err
 	}

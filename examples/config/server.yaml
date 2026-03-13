@@ -1,0 +1,30 @@
+listen_addr: ":8443"
+writer_backend: "mock"
+position_store: "memory"
+position_table: "loglugger_positions"
+field_mapping_file: "examples/mappings/basic.yaml"
+
+tls_cert_file: "certs/server.crt"
+tls_key_file: "certs/server.key"
+tls_ca_file: "certs/ca.crt"
+# tls_ca_path: "certs/ca"
+
+# Optional client certificate subject restrictions.
+# Supports literal values and regex: entries prefixed with "regex:".
+# tls_client_subject_cn:
+#   - "client-local"
+# tls_client_subject_o:
+#   - "dev"
+# tls_client_subject_ou:
+#   - "local"
+
+# Enable YDB writer/position store by switching writer_backend/position_store to "ydb"
+# and setting the values below.
+# ydb_endpoint: "grpcs://localhost:2135"
+# ydb_database: "/local"
+# ydb_table: "logs"
+# ydb_auth_mode: "anonymous" # anonymous|static|service-account-key|metadata
+# ydb_auth_login: ""
+# ydb_auth_password: ""
+# ydb_auth_sa_key_file: ""
+# ydb_auth_metadata_url: ""

@@ -25,21 +25,14 @@ go build -o bin/client ./cmd/client
 
 **Сервер** (обязательны TLS + mTLS):
 ```bash
-./bin/server \
-  -listen :8443 \
-  -tls-cert-file certs/server.crt \
-  -tls-key-file certs/server.key \
-  -tls-ca-file certs/ca.crt \
-  -field-mapping-file examples/mappings/basic.yaml
+./bin/server -config examples/config/server.yaml
 ```
 
-Полезные флаги сервера:
+Конфигурация сервера:
 
-- `-writer mock|ydb` выбирает выходной бэкенд.
-- `-position-store memory|ydb` выбирает хранение позиций в памяти или в YDB.
-- `-position-table loglugger_positions` задает таблицу YDB для сохранения ожидаемых позиций клиентов.
-- `-field-mapping-file mapping.yaml` загружает маппинг source->destination из YAML/JSON.
-- `-tls-client-subject-cn`, `-tls-client-subject-o`, `-tls-client-subject-ou` ограничивают допустимые поля Subject в клиентском сертификате.
+- Большинство настроек сервера теперь читается из YAML/JSON-файла, переданного через `-config`.
+- Пример всех ключей: `examples/config/server.yaml`.
+- Опциональный CLI-override: `-listen :8443` (переопределяет `listen_addr` из конфига).
 - Клиент получает стартовую позицию из `GET /v1/positions?client_id=...` и не хранит локальный файл позиции.
 
 **Клиент** (только Linux):
@@ -57,6 +50,7 @@ go build -o bin/client ./cmd/client
 - `-service-mask nginx.service` использует точное совпадение имени systemd unit.
 - `-service-mask 'nginx*.service'` использует glob-сопоставление.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` использует регулярное выражение.
+- `-server https://a:8443,https://b:8443` задает несколько endpoint'ов; при ретраях клиент переключается между ними.
 - `-message-regex` и `-message-regex-no-match send_raw|skip` управляют парсингом `MESSAGE`.
 - `-tls-ca-path` и `-tls-use-system-pool` управляют доверенным хранилищем сертификатов клиента.
 - Батчи клиента дополнительно ограничены 10 MB несжатых лог-данных на один запрос.
@@ -101,30 +95,13 @@ openssl x509 -req -in certs/client.csr \
 Если нужно, чтобы сервер проверял не только доверие к CA, но и значения Subject клиентского сертификата, запускайте его так:
 
 ```bash
-./bin/server \
-  -listen :8443 \
-  -tls-cert-file certs/server.crt \
-  -tls-key-file certs/server.key \
-  -tls-ca-file certs/ca.crt \
-  -tls-client-subject-cn client-local \
-  -tls-client-subject-o dev \
-  -tls-client-subject-ou local \
-  -field-mapping-file examples/mappings/basic.yaml \
-  -position-store ydb \
-  -ydb-endpoint grpcs://localhost:2135 \
-  -ydb-database /local \
-  -position-table loglugger_positions
+./bin/server -config examples/config/server.yaml
 ```
 
 Для локального end-to-end запуска на mock-бэкенде:
 
 ```bash
-./bin/server \
-  -listen :8443 \
-  -tls-cert-file certs/server.crt \
-  -tls-key-file certs/server.key \
-  -tls-ca-file certs/ca.crt \
-  -field-mapping-file examples/mappings/basic.yaml
+./bin/server -config examples/config/server.yaml
 ```
 
 ```bash
@@ -147,9 +124,9 @@ go test ./...
 
 ## Интеграция с YDB
 
-Сервер поддерживает `-writer ydb` и использует `github.com/ydb-platform/ydb-go-sdk/v3` для `BulkUpsert`. При включении YDB-бэкенда укажите `-ydb-endpoint`, `-ydb-database` и `-ydb-table`. Хранилище позиций также может использовать YDB через `-position-store ydb` и `-position-table`. `MockWriter` остается доступным для тестов и локальных прогонов.
+Сервер поддерживает `writer_backend: ydb` и использует `github.com/ydb-platform/ydb-go-sdk/v3` для `BulkUpsert`. При включении YDB-бэкенда укажите в конфиге `ydb_endpoint`, `ydb_database` и `ydb_table`. Хранилище позиций также может использовать YDB через `position_store: ydb` и `position_table`. `MockWriter` остается доступным для тестов и локальных прогонов.
 
-Создайте таблицу YDB для хранилища позиций перед запуском сервера с `-position-store ydb`:
+Создайте таблицу YDB для хранилища позиций перед запуском сервера с `position_store: ydb`:
 
 ```sql
 CREATE TABLE `loglugger_positions` (
@@ -162,16 +139,12 @@ CREATE TABLE `loglugger_positions` (
 Пример запуска с YDB:
 
 ```bash
-./bin/server \
-  -listen :8443 \
-  -writer ydb \
-  -ydb-endpoint grpcs://localhost:2135 \
-  -ydb-database /local \
-  -ydb-table logs \
-  -tls-cert-file certs/server.crt \
-  -tls-key-file certs/server.key \
-  -tls-ca-file certs/ca.crt \
-  -field-mapping-file examples/mappings/ydb.json \
-  -position-store ydb \
-  -position-table loglugger_positions
+# скопируйте examples/config/server.yaml и задайте:
+# writer_backend: ydb
+# position_store: ydb
+# ydb_endpoint: grpcs://localhost:2135
+# ydb_database: /local
+# ydb_table: logs
+# field_mapping_file: examples/mappings/ydb.json
+./bin/server -config examples/config/server.yaml
 ```

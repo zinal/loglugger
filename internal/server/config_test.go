@@ -73,6 +73,93 @@ func TestQuoteYDBPath(t *testing.T) {
 	}
 }
 
+func TestYDBAuthOptionValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		auth    YDBAuthOptions
+		wantErr bool
+	}{
+		{
+			name:    "anonymous default",
+			auth:    YDBAuthOptions{},
+			wantErr: false,
+		},
+		{
+			name: "static ok",
+			auth: YDBAuthOptions{
+				Mode:     "static",
+				Login:    "user",
+				Password: "pass",
+			},
+			wantErr: false,
+		},
+		{
+			name: "static without login",
+			auth: YDBAuthOptions{
+				Mode:     "static",
+				Password: "pass",
+			},
+			wantErr: true,
+		},
+		{
+			name: "static without password",
+			auth: YDBAuthOptions{
+				Mode:  "static",
+				Login: "user",
+			},
+			wantErr: true,
+		},
+		{
+			name: "service account key ok",
+			auth: YDBAuthOptions{
+				Mode:                  "service-account-key",
+				ServiceAccountKeyFile: "sa-key.json",
+			},
+			wantErr: false,
+		},
+		{
+			name: "service account key missing file",
+			auth: YDBAuthOptions{
+				Mode: "service-account-key",
+			},
+			wantErr: true,
+		},
+		{
+			name: "metadata default",
+			auth: YDBAuthOptions{
+				Mode: "metadata",
+			},
+			wantErr: false,
+		},
+		{
+			name: "metadata with custom url",
+			auth: YDBAuthOptions{
+				Mode:        "metadata",
+				MetadataURL: "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token",
+			},
+			wantErr: false,
+		},
+		{
+			name: "unsupported mode",
+			auth: YDBAuthOptions{
+				Mode: "unknown",
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ydbAuthOption(tt.auth)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestLoadServerTLSConfigSubjectValidation(t *testing.T) {
 	dir := t.TempDir()
 	certFile, keyFile, caFile, err := writeTLSFixture(dir)

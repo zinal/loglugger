@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ydb-platform/loglugger/internal/models"
@@ -24,17 +25,23 @@ type Sender interface {
 }
 
 type sender struct {
+	endpoints  []senderEndpoint
+	clientID   string
+	retryMax   int
+	retryDelay time.Duration
+	nextIndex  uint64
+}
+
+type senderEndpoint struct {
 	client      *http.Client
+	baseURL     string
 	batchesURL  string
 	positionURL string
-	clientID    string
-	retryMax    int
-	retryDelay  time.Duration
 }
 
 // SenderConfig configures the sender.
 type SenderConfig struct {
-	ServerURL   string
+	ServerURLs  []string
 	ClientID    string
 	HTTPTimeout time.Duration
 	RetryMax    int
@@ -44,25 +51,40 @@ type SenderConfig struct {
 
 // NewSender creates a sender.
 func NewSender(cfg SenderConfig) Sender {
-	transport := &http.Transport{}
-	if cfg.TLSConfig != nil {
-		transport.TLSClientConfig = cfg.TLSConfig
-	}
-	client := &http.Client{
-		Timeout:   cfg.HTTPTimeout,
-		Transport: transport,
+	endpoints := make([]senderEndpoint, 0, len(cfg.ServerURLs))
+	for _, raw := range cfg.ServerURLs {
+		baseURL := strings.TrimSuffix(raw, "/")
+		transport := &http.Transport{}
+		if cfg.TLSConfig != nil {
+			tlsCfg := cfg.TLSConfig.Clone()
+			if parsed, err := url.Parse(baseURL); err == nil {
+				tlsCfg.ServerName = parsed.Hostname()
+			}
+			transport.TLSClientConfig = tlsCfg
+		}
+		httpClient := &http.Client{
+			Timeout:   cfg.HTTPTimeout,
+			Transport: transport,
+		}
+		endpoints = append(endpoints, senderEndpoint{
+			client:      httpClient,
+			baseURL:     baseURL,
+			batchesURL:  baseURL + "/v1/batches",
+			positionURL: baseURL + "/v1/positions",
+		})
 	}
 	return &sender{
-		client:      client,
-		batchesURL:  strings.TrimSuffix(cfg.ServerURL, "/") + "/v1/batches",
-		positionURL: strings.TrimSuffix(cfg.ServerURL, "/") + "/v1/positions",
-		clientID:    cfg.ClientID,
-		retryMax:    cfg.RetryMax,
-		retryDelay:  cfg.RetryDelay,
+		endpoints:  endpoints,
+		clientID:   cfg.ClientID,
+		retryMax:   cfg.RetryMax,
+		retryDelay: cfg.RetryDelay,
 	}
 }
 
 func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.BatchResponse, error) {
+	if len(s.endpoints) == 0 {
+		return nil, fmt.Errorf("no server endpoints configured")
+	}
 	req.ClientID = s.clientID
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -83,17 +105,18 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 			}
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.batchesURL, bytes.NewReader(compressedBody))
+		endpoint := s.endpointForAttempt(attempt)
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.batchesURL, bytes.NewReader(compressedBody))
 		if err != nil {
 			return nil, err
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Content-Encoding", "gzip")
 
-		resp, err := s.client.Do(httpReq)
+		resp, err := endpoint.client.Do(httpReq)
 		if err != nil {
 			lastErr = err
-			slog.Debug("send failed", "attempt", attempt+1, "error", err)
+			slog.Debug("send failed", "attempt", attempt+1, "endpoint", endpoint.baseURL, "error", err)
 			continue
 		}
 
@@ -107,10 +130,13 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 
 		switch resp.StatusCode {
 		case http.StatusOK:
+			s.advanceStartIndex(attempt)
 			return &batchResp, nil
 		case http.StatusConflict:
+			s.advanceStartIndex(attempt)
 			return &batchResp, nil
 		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+			s.advanceStartIndex(attempt)
 			return &batchResp, ErrClientError{Message: batchResp.Message}
 		default:
 			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, batchResp.Message)
@@ -137,6 +163,9 @@ func compressJSON(body []byte) ([]byte, error) {
 }
 
 func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse, error) {
+	if len(s.endpoints) == 0 {
+		return nil, fmt.Errorf("no server endpoints configured")
+	}
 	var lastErr error
 	for attempt := 0; attempt <= s.retryMax; attempt++ {
 		if attempt > 0 {
@@ -147,15 +176,16 @@ func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse,
 			}
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.positionURL+"?client_id="+url.QueryEscape(s.clientID), nil)
+		endpoint := s.endpointForAttempt(attempt)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.positionURL+"?client_id="+url.QueryEscape(s.clientID), nil)
 		if err != nil {
 			return nil, err
 		}
 
-		resp, err := s.client.Do(req)
+		resp, err := endpoint.client.Do(req)
 		if err != nil {
 			lastErr = err
-			slog.Debug("fetch position failed", "attempt", attempt+1, "error", err)
+			slog.Debug("fetch position failed", "attempt", attempt+1, "endpoint", endpoint.baseURL, "error", err)
 			continue
 		}
 
@@ -170,8 +200,10 @@ func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse,
 
 		switch resp.StatusCode {
 		case http.StatusOK:
+			s.advanceStartIndex(attempt)
 			return &positionResp, nil
 		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+			s.advanceStartIndex(attempt)
 			return &positionResp, ErrClientError{Message: positionResp.Message}
 		default:
 			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, positionResp.Message)
@@ -182,6 +214,21 @@ func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse,
 		}
 	}
 	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
+func (s *sender) endpointForAttempt(attempt int) senderEndpoint {
+	start := int(atomic.LoadUint64(&s.nextIndex))
+	idx := (start + attempt) % len(s.endpoints)
+	return s.endpoints[idx]
+}
+
+func (s *sender) advanceStartIndex(attempt int) {
+	if len(s.endpoints) == 0 {
+		return
+	}
+	start := atomic.LoadUint64(&s.nextIndex)
+	next := uint64((int(start) + attempt + 1) % len(s.endpoints))
+	atomic.StoreUint64(&s.nextIndex, next)
 }
 
 // ErrClientError indicates a client error (4xx) that should not be retried.

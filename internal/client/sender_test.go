@@ -3,6 +3,7 @@ package client
 import (
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -28,7 +29,7 @@ func TestSenderCurrentPositionRetriesOn5xx(t *testing.T) {
 	defer srv.Close()
 
 	s := NewSender(SenderConfig{
-		ServerURL:   srv.URL,
+		ServerURLs:  []string{srv.URL},
 		ClientID:    "client-1",
 		HTTPTimeout: 2 * time.Second,
 		RetryMax:    3,
@@ -80,7 +81,7 @@ func TestSenderSendUsesGzipCompression(t *testing.T) {
 	defer srv.Close()
 
 	s := NewSender(SenderConfig{
-		ServerURL:   srv.URL,
+		ServerURLs:  []string{srv.URL},
 		ClientID:    "client-1",
 		HTTPTimeout: 2 * time.Second,
 		RetryMax:    0,
@@ -104,3 +105,56 @@ func TestSenderSendUsesGzipCompression(t *testing.T) {
 	}
 }
 
+func TestSenderCurrentPositionSwitchesEndpointOnFailure(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"error","message":"temporary"}`))
+	}))
+	defer primary.Close()
+
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryHits++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","current_position":"cursor-secondary"}`))
+	}))
+	defer secondary.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{primary.URL, secondary.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryMax:    1,
+		RetryDelay:  time.Millisecond,
+	})
+
+	resp, err := s.CurrentPosition(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentPosition() error = %v", err)
+	}
+	if resp == nil || resp.CurrentPosition != "cursor-secondary" {
+		t.Fatalf("CurrentPosition() = %+v, want cursor-secondary", resp)
+	}
+	if secondaryHits != 1 {
+		t.Fatalf("secondary hits = %d, want 1", secondaryHits)
+	}
+}
+
+func TestSenderSetsTLSHostPerEndpoint(t *testing.T) {
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{"https://host-a.example:8443", "https://host-b.example:9443"},
+		ClientID:    "client-1",
+		HTTPTimeout: time.Second,
+		RetryMax:    0,
+		RetryDelay:  time.Millisecond,
+		TLSConfig:   &tlsConfigWithMinVersion12,
+	}).(*sender)
+
+	gotA := s.endpoints[0].client.Transport.(*http.Transport).TLSClientConfig.ServerName
+	gotB := s.endpoints[1].client.Transport.(*http.Transport).TLSClientConfig.ServerName
+	if gotA != "host-a.example" || gotB != "host-b.example" {
+		t.Fatalf("server names = [%q %q], want [host-a.example host-b.example]", gotA, gotB)
+	}
+}
+
+var tlsConfigWithMinVersion12 = tls.Config{MinVersion: tls.VersionTLS12}
