@@ -27,10 +27,11 @@ type Sender interface {
 type sender struct {
 	endpoints  []senderEndpoint
 	clientID   string
-	retryMax   int
 	retryDelay time.Duration
 	nextIndex  uint64
 }
+
+const maxRetryBackoff = time.Minute
 
 type senderEndpoint struct {
 	client      *http.Client
@@ -44,7 +45,6 @@ type SenderConfig struct {
 	ServerURLs  []string
 	ClientID    string
 	HTTPTimeout time.Duration
-	RetryMax    int
 	RetryDelay  time.Duration
 	TLSConfig   *tls.Config
 }
@@ -54,7 +54,12 @@ func NewSender(cfg SenderConfig) Sender {
 	endpoints := make([]senderEndpoint, 0, len(cfg.ServerURLs))
 	for _, raw := range cfg.ServerURLs {
 		baseURL := strings.TrimSuffix(raw, "/")
-		transport := &http.Transport{}
+		transport := &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+			ForceAttemptHTTP2:   true,
+		}
 		if cfg.TLSConfig != nil {
 			tlsCfg := cfg.TLSConfig.Clone()
 			if parsed, err := url.Parse(baseURL); err == nil {
@@ -76,7 +81,6 @@ func NewSender(cfg SenderConfig) Sender {
 	return &sender{
 		endpoints:  endpoints,
 		clientID:   cfg.ClientID,
-		retryMax:   cfg.RetryMax,
 		retryDelay: cfg.RetryDelay,
 	}
 }
@@ -95,17 +99,12 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 		return nil, fmt.Errorf("compress request: %w", err)
 	}
 
-	var lastErr error
-	for attempt := 0; attempt <= s.retryMax; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(s.retryDelay * time.Duration(1<<uint(attempt-1))):
-			}
+	for attempt := 0; ; attempt++ {
+		if err := sleepForRetry(ctx, s.retryDelay, attempt); err != nil {
+			return nil, err
 		}
 
-		endpoint := s.endpointForAttempt(attempt)
+		endpoint, endpointIdx := s.currentEndpoint()
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.batchesURL, bytes.NewReader(compressedBody))
 		if err != nil {
 			return nil, err
@@ -115,8 +114,8 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 
 		resp, err := endpoint.client.Do(httpReq)
 		if err != nil {
-			lastErr = err
 			slog.Debug("send failed", "attempt", attempt+1, "endpoint", endpoint.baseURL, "error", err)
+			s.advanceStartIndexOnFailure(endpointIdx)
 			continue
 		}
 
@@ -130,23 +129,19 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 
 		switch resp.StatusCode {
 		case http.StatusOK:
-			s.advanceStartIndex(attempt)
 			return &batchResp, nil
 		case http.StatusConflict:
-			s.advanceStartIndex(attempt)
 			return &batchResp, nil
 		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
-			s.advanceStartIndex(attempt)
 			return &batchResp, ErrClientError{Message: batchResp.Message}
 		default:
-			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, batchResp.Message)
 			if resp.StatusCode >= 500 {
+				s.advanceStartIndexOnFailure(endpointIdx)
 				continue
 			}
-			return &batchResp, lastErr
+			return &batchResp, fmt.Errorf("HTTP %d: %s", resp.StatusCode, batchResp.Message)
 		}
 	}
-	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
 }
 
 func compressJSON(body []byte) ([]byte, error) {
@@ -166,17 +161,12 @@ func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse,
 	if len(s.endpoints) == 0 {
 		return nil, fmt.Errorf("no server endpoints configured")
 	}
-	var lastErr error
-	for attempt := 0; attempt <= s.retryMax; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(s.retryDelay * time.Duration(1<<uint(attempt-1))):
-			}
+	for attempt := 0; ; attempt++ {
+		if err := sleepForRetry(ctx, s.retryDelay, attempt); err != nil {
+			return nil, err
 		}
 
-		endpoint := s.endpointForAttempt(attempt)
+		endpoint, endpointIdx := s.currentEndpoint()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.positionURL+"?client_id="+url.QueryEscape(s.clientID), nil)
 		if err != nil {
 			return nil, err
@@ -184,8 +174,8 @@ func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse,
 
 		resp, err := endpoint.client.Do(req)
 		if err != nil {
-			lastErr = err
 			slog.Debug("fetch position failed", "attempt", attempt+1, "endpoint", endpoint.baseURL, "error", err)
+			s.advanceStartIndexOnFailure(endpointIdx)
 			continue
 		}
 
@@ -194,40 +184,66 @@ func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse,
 
 		var positionResp models.PositionResponse
 		if err := json.Unmarshal(body, &positionResp); err != nil {
-			lastErr = fmt.Errorf("decode position response: %w", err)
+			slog.Debug("decode position response failed", "attempt", attempt+1, "endpoint", endpoint.baseURL, "error", err)
+			s.advanceStartIndexOnFailure(endpointIdx)
 			continue
 		}
 
 		switch resp.StatusCode {
 		case http.StatusOK:
-			s.advanceStartIndex(attempt)
 			return &positionResp, nil
 		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
-			s.advanceStartIndex(attempt)
 			return &positionResp, ErrClientError{Message: positionResp.Message}
 		default:
-			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, positionResp.Message)
 			if resp.StatusCode >= 500 {
+				s.advanceStartIndexOnFailure(endpointIdx)
 				continue
 			}
-			return &positionResp, lastErr
+			return &positionResp, fmt.Errorf("HTTP %d: %s", resp.StatusCode, positionResp.Message)
 		}
 	}
-	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
 }
 
-func (s *sender) endpointForAttempt(attempt int) senderEndpoint {
-	start := int(atomic.LoadUint64(&s.nextIndex))
-	idx := (start + attempt) % len(s.endpoints)
-	return s.endpoints[idx]
+func sleepForRetry(ctx context.Context, baseDelay time.Duration, attempt int) error {
+	if attempt == 0 {
+		return nil
+	}
+	delay := retryDelayForAttempt(baseDelay, attempt)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(delay):
+		return nil
+	}
 }
 
-func (s *sender) advanceStartIndex(attempt int) {
+func retryDelayForAttempt(baseDelay time.Duration, attempt int) time.Duration {
+	if baseDelay <= 0 {
+		return 0
+	}
+	delay := baseDelay
+	for i := 1; i < attempt; i++ {
+		if delay >= maxRetryBackoff/2 {
+			return maxRetryBackoff
+		}
+		delay *= 2
+	}
+	if delay > maxRetryBackoff {
+		return maxRetryBackoff
+	}
+	return delay
+}
+
+func (s *sender) currentEndpoint() (senderEndpoint, int) {
+	idx := int(atomic.LoadUint64(&s.nextIndex)) % len(s.endpoints)
+	return s.endpoints[idx], idx
+}
+
+func (s *sender) advanceStartIndexOnFailure(failedIndex int) {
 	if len(s.endpoints) == 0 {
 		return
 	}
-	start := atomic.LoadUint64(&s.nextIndex)
-	next := uint64((int(start) + attempt + 1) % len(s.endpoints))
+	next := uint64((failedIndex + 1) % len(s.endpoints))
 	atomic.StoreUint64(&s.nextIndex, next)
 }
 

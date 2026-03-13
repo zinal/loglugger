@@ -32,7 +32,6 @@ func TestSenderCurrentPositionRetriesOn5xx(t *testing.T) {
 		ServerURLs:  []string{srv.URL},
 		ClientID:    "client-1",
 		HTTPTimeout: 2 * time.Second,
-		RetryMax:    3,
 		RetryDelay:  time.Millisecond,
 	})
 
@@ -45,6 +44,39 @@ func TestSenderCurrentPositionRetriesOn5xx(t *testing.T) {
 	}
 	if attempts != 3 {
 		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+}
+
+func TestSenderCurrentPositionRetriesEndlessly(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 5 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"error","message":"temporary"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","current_position":"cursor-5"}`))
+	}))
+	defer srv.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{srv.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+
+	resp, err := s.CurrentPosition(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentPosition() error = %v", err)
+	}
+	if resp == nil || resp.Status != "ok" || resp.CurrentPosition != "cursor-5" {
+		t.Fatalf("CurrentPosition() = %+v, want ok/cursor-5", resp)
+	}
+	if attempts != 5 {
+		t.Fatalf("attempts = %d, want 5", attempts)
 	}
 }
 
@@ -84,7 +116,6 @@ func TestSenderSendUsesGzipCompression(t *testing.T) {
 		ServerURLs:  []string{srv.URL},
 		ClientID:    "client-1",
 		HTTPTimeout: 2 * time.Second,
-		RetryMax:    0,
 		RetryDelay:  time.Millisecond,
 	})
 
@@ -124,7 +155,6 @@ func TestSenderCurrentPositionSwitchesEndpointOnFailure(t *testing.T) {
 		ServerURLs:  []string{primary.URL, secondary.URL},
 		ClientID:    "client-1",
 		HTTPTimeout: 2 * time.Second,
-		RetryMax:    1,
 		RetryDelay:  time.Millisecond,
 	})
 
@@ -140,12 +170,58 @@ func TestSenderCurrentPositionSwitchesEndpointOnFailure(t *testing.T) {
 	}
 }
 
+func TestSenderCurrentPositionKeepsEndpointOnSuccess(t *testing.T) {
+	primaryHits := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","current_position":"cursor-primary"}`))
+	}))
+	defer primary.Close()
+
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryHits++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","current_position":"cursor-secondary"}`))
+	}))
+	defer secondary.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{primary.URL, secondary.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+
+	first, err := s.CurrentPosition(context.Background())
+	if err != nil {
+		t.Fatalf("first CurrentPosition() error = %v", err)
+	}
+	second, err := s.CurrentPosition(context.Background())
+	if err != nil {
+		t.Fatalf("second CurrentPosition() error = %v", err)
+	}
+
+	if first == nil || first.CurrentPosition != "cursor-primary" {
+		t.Fatalf("first CurrentPosition() = %+v, want cursor-primary", first)
+	}
+	if second == nil || second.CurrentPosition != "cursor-primary" {
+		t.Fatalf("second CurrentPosition() = %+v, want cursor-primary", second)
+	}
+	if primaryHits != 2 {
+		t.Fatalf("primary hits = %d, want 2", primaryHits)
+	}
+	if secondaryHits != 0 {
+		t.Fatalf("secondary hits = %d, want 0", secondaryHits)
+	}
+}
+
 func TestSenderSetsTLSHostPerEndpoint(t *testing.T) {
 	s := NewSender(SenderConfig{
 		ServerURLs:  []string{"https://host-a.example:8443", "https://host-b.example:9443"},
 		ClientID:    "client-1",
 		HTTPTimeout: time.Second,
-		RetryMax:    0,
 		RetryDelay:  time.Millisecond,
 		TLSConfig:   &tlsConfigWithMinVersion12,
 	}).(*sender)

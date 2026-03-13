@@ -50,7 +50,7 @@ Useful client flags:
 - `-service-mask nginx.service` uses exact systemd unit matching.
 - `-service-mask 'nginx*.service'` uses glob matching.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
-- `-server https://a:8443,https://b:8443` configures multiple endpoints; retries rotate through the list.
+- `-server https://a:8443,https://b:8443` configures multiple endpoints; client uses sticky endpoint selection and switches to the next endpoint only after transient failure (`5xx` or network error).
 - `-message-regex` and `-message-regex-no-match send_raw|skip` control MESSAGE parsing.
 - `-tls-ca-path` and `-tls-use-system-pool` control the client trust store.
 - Client batches are additionally limited to 10 MB of uncompressed log data per request.

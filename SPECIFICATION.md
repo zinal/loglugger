@@ -55,7 +55,7 @@ The system implements a **position-tracking protocol** to ensure exactly-once de
 2. Optionally filter records by service name using a configurable mask (e.g., glob, regex, or prefix).
 3. Optionally parse the MESSAGE field with a regex; extract named groups and send them instead of the raw message.
 4. Batch records for efficient transmission.
-5. Send batches to the server via HTTP in JSON format.
+5. Send batches to one or more server endpoints via HTTP in JSON format.
 6. Maintain and validate position continuity with the server.
 7. Handle position mismatch and reset scenarios.
 
@@ -114,7 +114,8 @@ Before batching, the client may parse the journal `MESSAGE` field using a config
   - Position lookup: `GET /v1/positions?client_id=<client_id>`
   - Batch submit: `POST /v1/batches`
 - **Transport**: HTTPS with TLS. The client verifies the server certificate using a configurable trust store (see §9.1). For mTLS, the client presents its own certificate.
-- **Retries**: Implement retry with exponential backoff for transient failures (5xx, network errors). Do not retry on 4xx (except possibly 409 with position mismatch—see server spec).
+- **Multiple servers**: The client may be configured with multiple server base URLs. Endpoint selection is **sticky**: the client keeps using the current endpoint while requests succeed, and switches to the next endpoint only after a transient failure (network error or 5xx) during retry. As servers are stateless, they are expected to be connected to the same backing database.
+- **Retries**: Implement endless retry with exponential backoff for transient failures (5xx, network errors) so batches are not dropped during prolonged outages. Do not retry on 4xx (except possibly 409 with position mismatch—see server spec).
 - **Timeout**: Configurable request timeout.
 - **Client identification**: Each client instance should have a unique identifier (e.g., hostname + instance ID) for server-side position tracking.
 
@@ -127,7 +128,7 @@ Before batching, the client may parse the journal `MESSAGE` field using a config
 1. Accept HTTP requests with batches of log records.
 2. Validate position continuity per client.
 3. Map source fields to destination table columns using the configured field mapping.
-4. Persist batches to YDB via BulkUpsert.
+4. Persist batches to the configured backend (`mock` for testing, or `ydb` for the actual usage).
 5. Return appropriate responses including position information or errors.
 
 ### 5.2 HTTP API
@@ -265,6 +266,11 @@ RETURN 200 with next_position
 - **Batching**: Map incoming records to table rows. Add server-side metadata (timestamp, client_id) before upsert.
 - **Write ordering**: Successful record persistence must happen before position advancement. If record persistence fails, the server must not update `expected_position`.
 - **Library**: Use `github.com/ydb-platform/ydb-go-sdk/v3` or equivalent.
+- **Authentication modes**: YDB connection auth is configurable and supports:
+  - `anonymous` (default)
+  - `static` (login/password)
+  - `service-account-key` (service account key file)
+  - `metadata` (instance metadata credentials; optional metadata URL override)
 
 ### 5.5 Field Mapping (Source → Destination)
 
@@ -395,7 +401,7 @@ loglugger/
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| server_url | string | — | Base URL of the server (must use `https://`) |
+| server_urls | string/list | — | One or more server base URLs (must use `https://`); list or comma-separated string |
 | client_id | string | hostname | Unique client identifier |
 | service_mask | string | "" | Filter mask for `_SYSTEMD_UNIT` (empty = no filter) |
 | **Message parsing** | | | |
@@ -404,7 +410,6 @@ loglugger/
 | batch_size | int | 1000 | Max records per batch (also constrained by the fixed 10 MB uncompressed log-data limit per request) |
 | batch_timeout | duration | 5s | Max time before flushing partial batch |
 | http_timeout | duration | 30s | HTTP request timeout |
-| retry_max | int | 5 | Max retries on transient failure |
 | retry_base_delay | duration | 1s | Base delay for exponential backoff |
 | **TLS** | | | |
 | tls_ca_file | string | — | Path to PEM file with CA certs for server verification |
@@ -419,11 +424,18 @@ loglugger/
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| listen_addr | string | :8080 | HTTP listen address (use `:8443` for TLS) |
+| config_file | string | — | Path to server YAML/JSON configuration file passed via `-config` |
+| listen_addr | string | :8443 | HTTPS listen address |
+| writer_backend | string | mock | Output backend (`mock`, `ydb`) |
 | ydb_endpoint | string | — | YDB endpoint |
 | ydb_database | string | — | YDB database path |
 | ydb_table | string | logs | Target table name |
-| position_store | string | ydb | Backend for position storage (`ydb`, `memory`) |
+| ydb_auth_mode | string | anonymous | YDB auth mode (`anonymous`, `static`, `service-account-key`, `metadata`) |
+| ydb_auth_login | string | — | Login for `static` auth mode |
+| ydb_auth_password | string | — | Password for `static` auth mode |
+| ydb_auth_sa_key_file | string | — | Path to service account key file for `service-account-key` auth mode |
+| ydb_auth_metadata_url | string | — | Optional metadata endpoint URL override for `metadata` auth mode |
+| position_store | string | memory | Backend for position storage (`ydb`, `memory`) |
 | position_table | string | loglugger_positions | YDB table used to store expected position per client |
 | **Field mapping** | | | |
 | field_mapping_file | string | — | Path to YAML/JSON file with source→destination field mappings |
@@ -435,6 +447,8 @@ loglugger/
 | tls_client_subject_cn | string/list | — | Required CN value(s) in client certificate subject |
 | tls_client_subject_o | string/list | — | Required O value(s) in client certificate subject |
 | tls_client_subject_ou | string/list | — | Required OU value(s) in client certificate subject |
+
+**Server startup**: Most server settings are read from `config_file` (`-config` CLI flag). `listen_addr` may be overridden with `-listen` for quick local overrides.
 
 **TLS**: `tls_cert_file` and `tls_key_file` are required for HTTPS. For mTLS, `tls_ca_file` or `tls_ca_path` is required. Subject checks (`tls_client_subject_*`) are optional; if any are set, all configured attributes must match.
 
@@ -477,10 +491,9 @@ The server configuration defines which subject attributes are required and their
 
 | Attribute | Config key example | Format | Description |
 |-----------|-------------------|--------|-------------|
-| CN | `tls.client_subject.cn` | string or list | Required Common Name(s) |
-| O | `tls.client_subject.o` | string or list | Required Organization(s) |
-| OU | `tls.client_subject.ou` | string or list | Required Organizational Unit(s) |
-| (custom) | `tls.client_subject.<oid>` | string or list | Custom OID values |
+| CN | `tls_client_subject_cn` | string or list | Required Common Name(s) |
+| O | `tls_client_subject_o` | string or list | Required Organization(s) |
+| OU | `tls_client_subject_ou` | string or list | Required Organizational Unit(s) |
 
 If multiple values are provided (list), the certificate subject value must match at least one. All configured attributes must be present and match.
 

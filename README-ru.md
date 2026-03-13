@@ -50,7 +50,7 @@ go build -o bin/client ./cmd/client
 - `-service-mask nginx.service` использует точное совпадение имени systemd unit.
 - `-service-mask 'nginx*.service'` использует glob-сопоставление.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` использует регулярное выражение.
-- `-server https://a:8443,https://b:8443` задает несколько endpoint'ов; при ретраях клиент переключается между ними.
+- `-server https://a:8443,https://b:8443` задает несколько endpoint'ов; выбор endpoint sticky: клиент использует текущий endpoint, пока запросы успешны, и переключается на следующий только после временной ошибки (`5xx` или сетевая ошибка).
 - `-message-regex` и `-message-regex-no-match send_raw|skip` управляют парсингом `MESSAGE`.
 - `-tls-ca-path` и `-tls-use-system-pool` управляют доверенным хранилищем сертификатов клиента.
 - Батчи клиента дополнительно ограничены 10 MB несжатых лог-данных на один запрос.

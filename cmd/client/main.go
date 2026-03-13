@@ -26,7 +26,6 @@ type clientConfig struct {
 	BatchSize        int
 	BatchTimeout     time.Duration
 	HTTPTimeout      time.Duration
-	RetryMax         int
 	RetryDelay       time.Duration
 	TLSCAFile        string
 	TLSCAPath        string
@@ -71,7 +70,6 @@ func main() {
 		ServerURLs:  cfg.ServerURLs,
 		ClientID:    cfg.ClientID,
 		HTTPTimeout: cfg.HTTPTimeout,
-		RetryMax:    cfg.RetryMax,
 		RetryDelay:  cfg.RetryDelay,
 		TLSConfig:   tlsConfig,
 	})
@@ -152,7 +150,6 @@ func parseClientConfig() clientConfig {
 	flag.IntVar(&cfg.BatchSize, "batch-size", 50000, "Max records per batch")
 	flag.DurationVar(&cfg.BatchTimeout, "batch-timeout", 5*time.Second, "Batch flush timeout")
 	flag.DurationVar(&cfg.HTTPTimeout, "http-timeout", 30*time.Second, "HTTP timeout")
-	flag.IntVar(&cfg.RetryMax, "retry-max", 5, "Max retries")
 	flag.DurationVar(&cfg.RetryDelay, "retry-delay", time.Second, "Base retry delay")
 	flag.StringVar(&cfg.TLSCAFile, "tls-ca-file", "", "CA cert file for server verification")
 	flag.StringVar(&cfg.TLSCAPath, "tls-ca-path", "", "CA cert directory for server verification")
