@@ -125,6 +125,13 @@ go test ./...
 
 Сервер поддерживает `writer_backend: ydb` и использует `github.com/ydb-platform/ydb-go-sdk/v3` для `BulkUpsert`. При включении YDB-бэкенда укажите в конфиге `ydb_endpoint`, `ydb_database` и `ydb_table`. Хранилище позиций также может использовать YDB через `position_store: ydb` и `position_table`. `MockWriter` остается доступным для тестов и локальных прогонов.
 
+Поддерживаемые режимы аутентификации YDB:
+
+- `anonymous` (по умолчанию)
+- `static` через `ydb_auth_login` + `ydb_auth_password`
+- `service-account-key` через `ydb_auth_sa_key_file`
+- `metadata` (учетные данные metadata-сервиса, опционально `ydb_auth_metadata_url`)
+
 Опциональный путь к CA-сертификату для TLS к YDB:
 
 - `ydb_ca_path` — путь к PEM-файлу с CA-сертификатами для проверки TLS-соединения с YDB.
