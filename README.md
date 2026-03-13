@@ -59,6 +59,8 @@ Useful client flags:
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
 - `-message-regex` and `-message-regex-no-match send_raw|skip` control MESSAGE parsing.
 - `-tls-ca-path` and `-tls-use-system-pool` control the client trust store.
+- Client batches are additionally limited to 10 MB of uncompressed log data per request.
+- If a single record exceeds 10 MB, it is sent as a single-record request (not dropped).
 
 ### Example Mapping Files
 

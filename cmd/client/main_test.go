@@ -90,6 +90,29 @@ func TestBuildClientTLSConfigRejectsNonHTTPS(t *testing.T) {
 	}
 }
 
+func TestBuildClientTLSConfigSetsServerNameFromURLHost(t *testing.T) {
+	tlsCfg, err := buildClientTLSConfig(clientConfig{
+		ServerURL:        "https://localhost:8443",
+		TLSUseSystemPool: true,
+	})
+	if err != nil {
+		t.Fatalf("buildClientTLSConfig() error = %v", err)
+	}
+	if tlsCfg.ServerName != "localhost" {
+		t.Fatalf("ServerName = %q, want localhost", tlsCfg.ServerName)
+	}
+}
+
+func TestBuildClientTLSConfigRejectsMissingHost(t *testing.T) {
+	_, err := buildClientTLSConfig(clientConfig{
+		ServerURL:        "https://",
+		TLSUseSystemPool: true,
+	})
+	if err == nil {
+		t.Fatal("expected error for missing host")
+	}
+}
+
 type stubSender struct {
 	resp         *models.BatchResponse
 	positionResp *models.PositionResponse

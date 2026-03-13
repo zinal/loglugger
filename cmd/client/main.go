@@ -171,7 +171,16 @@ func buildClientTLSConfig(cfg clientConfig) (*tls.Config, error) {
 	if serverURL.Scheme != "https" {
 		return nil, fmt.Errorf("server URL must use https")
 	}
-	return client.LoadClientTLSConfig(cfg.TLSCAFile, cfg.TLSCAPath, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSUseSystemPool)
+	serverName := serverURL.Hostname()
+	if serverName == "" {
+		return nil, fmt.Errorf("server URL must include host name")
+	}
+	tlsCfg, err := client.LoadClientTLSConfig(cfg.TLSCAFile, cfg.TLSCAPath, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSUseSystemPool)
+	if err != nil {
+		return nil, err
+	}
+	tlsCfg.ServerName = serverName
+	return tlsCfg, nil
 }
 
 func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bool) {

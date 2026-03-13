@@ -39,9 +39,9 @@ The system implements a **position-tracking protocol** to ensure exactly-once de
 │  │  (regex)  │  │  ◄─────────────────│  └─────┬─────┘  │
 │  └─────┬─────┘  │   JSON response    │        │        │
 │        │        │                    │  ┌─────▼─────┐  │
-│  ┌─────▼─────┐  │                    │  │  YDB     │  │
-│  │  position │  │                    │  │BulkUpsert│  │
-│  │  tracker  │  │                    │  └──────────┘  │
+│  ┌─────▼─────┐  │                    │  │  YDB      │  │
+│  │  position │  │                    │  │BulkUpsert │  │
+│  │  tracker  │  │                    │  └───────────┘  │
 └─────────────────┘                    └─────────────────┘
 ```
 
@@ -97,8 +97,12 @@ Before batching, the client may parse the journal `MESSAGE` field using a config
 
 ### 4.5 Batching
 
-- **Batch size**: Configurable (e.g., max records per batch, max bytes, or max time window).
-- **Flush triggers**: Batch is sent when size limit is reached, timeout expires, or on graceful shutdown.
+- **Record count limit**: `batch_size` defines the maximum number of records in a normal batch.
+- **Uncompressed payload limit**: The client must not send more than **10 MB** of log data (uncompressed) in one request.
+  - Log-data size is calculated from record content fields (`message`, `parsed` values, `fields` values, and selected metadata string fields), before gzip compression.
+  - If adding another record would exceed 10 MB, the client flushes the current batch and sends the next records in subsequent requests.
+  - If a single record itself is larger than 10 MB, the client still sends it as a single-record batch (exception to the normal cap), rather than dropping it.
+- **Flush triggers**: Batch is sent when record-count limit is reached, uncompressed payload limit is reached, timeout expires, or on graceful shutdown.
 
 ### 4.6 HTTP Client
 
@@ -397,7 +401,7 @@ loglugger/
 | **Message parsing** | | | |
 | message_regex | string | "" | Regex with named groups to parse MESSAGE. Empty = no parsing, send raw message |
 | message_regex_no_match | string | send_raw | Behavior when regex does not match: `send_raw` (default) or `skip` |
-| batch_size | int | 1000 | Max records per batch |
+| batch_size | int | 1000 | Max records per batch (also constrained by the fixed 10 MB uncompressed log-data limit per request) |
 | batch_timeout | duration | 5s | Max time before flushing partial batch |
 | http_timeout | duration | 30s | HTTP request timeout |
 | retry_max | int | 5 | Max retries on transient failure |
