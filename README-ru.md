@@ -12,9 +12,8 @@
 ## Сборка
 
 ```bash
-mkdir -p bin
-go build -o bin/server ./cmd/server
-go build -o bin/client ./cmd/client
+sudo apt-get install -y libsystemd-dev  # либо аналог для вашей операционной системы
+./build.sh
 ```
 
 Для работы клиента с journald требуется Linux. На macOS/Windows клиент завершится на старте с ошибкой "journald is only supported on Linux".

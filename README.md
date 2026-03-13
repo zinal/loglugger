@@ -12,9 +12,8 @@ See [SPECIFICATION.md](SPECIFICATION.md) for the formal specification.
 ## Build
 
 ```bash
-mkdir -p bin
-go build -o bin/server ./cmd/server
-go build -o bin/client ./cmd/client
+sudo apt-get install -y libsystemd-dev  # or your operating system equivalent
+./build.sh
 ```
 
 The client requires Linux for journald support. On macOS/Windows, the client will fail at startup with "journald is only supported on Linux".
