@@ -1,0 +1,62 @@
+{
+  "field_mapping": [
+    {
+      "source": "parsed.P_DTTM",
+      "destination": "log_dttm"
+    },
+    {
+      "source": "parsed.P_SERVICE",
+      "destination": "service_name"
+    },
+    {
+      "source": "parsed.P_LEVEL",
+      "destination": "log_level"
+    },
+    {
+      "source": "parsed.P_MESSAGE",
+      "destination": "log_message"
+    },
+    {
+      "source": "message",
+      "destination": "raw_message"
+    },
+    {
+      "source": "syslog_identifier",
+      "destination": "syslog_id"
+    },
+    {
+      "source": "systemd_unit",
+      "destination": "systemd_unit"
+    },
+    {
+      "source": "realtime_timestamp",
+      "destination": "realtime_ts_us",
+      "transform": "int64"
+    },
+    {
+      "source": "monotonic_timestamp",
+      "destination": "monotonic_ts",
+      "transform": "uint64"
+    },
+    {
+      "source": "priority",
+      "destination": "priority",
+      "transform": "int"
+    },
+    {
+      "source": "fields.CODE_FILE",
+      "destination": "code_file",
+      "default": "unknown"
+    },
+    {
+      "source": "fields.CODE_LINE",
+      "destination": "code_line",
+      "transform": "int64",
+      "default": "0"
+    },
+    {
+      "source": "client_id",
+      "destination": "client_id"
+    }
+  ]
+}

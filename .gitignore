@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+
+# Go build outputs
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test artifacts
+*.test
+*.out
+coverage.out
+
+# Local runtime state
+/state/
+
+# Local TLS materials
+/certs/
+*.pem
+*.crt
+*.csr
+*.key
+*.srl
+
+# Editor temp files
+*.swp
+*.swo
+*~

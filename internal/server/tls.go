@@ -1,0 +1,104 @@
+package server
+
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+)
+
+type ServerTLSOptions struct {
+	CertFile  string
+	KeyFile   string
+	CAFile    string
+	CAPath    string
+	AllowedCN []string
+	AllowedO  []string
+	AllowedOU []string
+}
+
+// LoadServerTLSConfig builds the server TLS config with optional subject checks.
+func LoadServerTLSConfig(opts ServerTLSOptions) (*tls.Config, error) {
+	if opts.CertFile == "" || opts.KeyFile == "" {
+		return nil, fmt.Errorf("tls server certificate and key are required")
+	}
+	if opts.CAFile == "" && opts.CAPath == "" {
+		return nil, fmt.Errorf("client CA file or path is required for mTLS")
+	}
+
+	cert, err := tls.LoadX509KeyPair(opts.CertFile, opts.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load server certificate: %w", err)
+	}
+	clientPool, err := loadServerCertPool(opts.CAFile, opts.CAPath)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    clientPool,
+	}
+	if len(opts.AllowedCN) > 0 || len(opts.AllowedO) > 0 || len(opts.AllowedOU) > 0 {
+		cfg.VerifyConnection = func(state tls.ConnectionState) error {
+			if len(state.PeerCertificates) == 0 {
+				return fmt.Errorf("missing client certificate")
+			}
+			subject := state.PeerCertificates[0].Subject
+			if len(opts.AllowedCN) > 0 && !slices.Contains(opts.AllowedCN, subject.CommonName) {
+				return fmt.Errorf("client certificate common name %q is not allowed", subject.CommonName)
+			}
+			if len(opts.AllowedO) > 0 && !containsAny(subject.Organization, opts.AllowedO) {
+				return fmt.Errorf("client certificate organization is not allowed")
+			}
+			if len(opts.AllowedOU) > 0 && !containsAny(subject.OrganizationalUnit, opts.AllowedOU) {
+				return fmt.Errorf("client certificate organizational unit is not allowed")
+			}
+			return nil
+		}
+	}
+	return cfg, nil
+}
+
+func loadServerCertPool(caFile, caPath string) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	if caFile != "" {
+		pem, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("read client CA file: %w", err)
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("no certificates found in %s", caFile)
+		}
+	}
+	if caPath != "" {
+		entries, err := os.ReadDir(caPath)
+		if err != nil {
+			return nil, fmt.Errorf("read client CA path: %w", err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			pem, err := os.ReadFile(filepath.Join(caPath, entry.Name()))
+			if err != nil {
+				continue
+			}
+			pool.AppendCertsFromPEM(pem)
+		}
+	}
+	return pool, nil
+}
+
+func containsAny(values []string, allowed []string) bool {
+	for _, value := range values {
+		if slices.Contains(allowed, value) {
+			return true
+		}
+	}
+	return false
+}
