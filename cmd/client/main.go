@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"flag"
 	"log/slog"
 	"net/url"
@@ -11,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mzinal/loglugger/internal/client"
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/client"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 type clientConfig struct {
@@ -167,11 +168,8 @@ func buildClientTLSConfig(cfg clientConfig) (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if serverURL.Scheme != "https" && (cfg.TLSCAFile != "" || cfg.TLSCAPath != "" || cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" || cfg.TLSUseSystemPool) {
-		return nil, nil
-	}
 	if serverURL.Scheme != "https" {
-		return nil, nil
+		return nil, fmt.Errorf("server URL must use https")
 	}
 	return client.LoadClientTLSConfig(cfg.TLSCAFile, cfg.TLSCAPath, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSUseSystemPool)
 }

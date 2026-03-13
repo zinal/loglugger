@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
-	"github.com/mzinal/loglugger/internal/client"
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/client"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 func TestFetchStartupPositionNotFound(t *testing.T) {
@@ -76,6 +77,16 @@ func TestSendBatchFallsBackToResetOnSeekFailure(t *testing.T) {
 	}
 	if journal.seekCalls[1] != "" {
 		t.Fatalf("second seek = %q, want head reset", journal.seekCalls[1])
+	}
+}
+
+func TestBuildClientTLSConfigRejectsNonHTTPS(t *testing.T) {
+	_, err := buildClientTLSConfig(clientConfig{
+		ServerURL:   "http://localhost:8080",
+		HTTPTimeout: 5 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected error for non-https server URL")
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 func TestHandler_ResetBatch(t *testing.T) {
@@ -291,6 +291,39 @@ func TestHandler_PositionStoreErrorReturnsFailure(t *testing.T) {
 		Records:      []models.Record{{Message: "hello"}},
 	})
 
+	if resp.Status != "error" {
+		t.Fatalf("status = %q, want error", resp.Status)
+	}
+}
+
+func TestHandler_RejectsRecordWithMessageAndParsed(t *testing.T) {
+	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	resp := handler.handle(context.Background(), &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "pos-1",
+		Records: []models.Record{
+			{
+				Message: "raw",
+				Parsed:  map[string]string{"P_MESSAGE": "parsed"},
+			},
+		},
+	})
+	if resp.Status != "error" {
+		t.Fatalf("status = %q, want error", resp.Status)
+	}
+}
+
+func TestHandler_RejectsRecordWithoutMessageOrParsed(t *testing.T) {
+	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	resp := handler.handle(context.Background(), &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "pos-1",
+		Records: []models.Record{
+			{},
+		},
+	})
 	if resp.Status != "error" {
 		t.Fatalf("status = %q, want error", resp.Status)
 	}

@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/mzinal/loglugger/internal/models"
-	"github.com/mzinal/loglugger/internal/server"
+	"github.com/ydb-platform/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/server"
 )
 
 // TestFunctional_ClientServerFlow tests the full batch submission flow:

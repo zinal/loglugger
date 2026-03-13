@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 // JournalEntry holds a single journal record with position.

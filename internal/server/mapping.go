@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 // FieldMapping maps source field path to destination column.

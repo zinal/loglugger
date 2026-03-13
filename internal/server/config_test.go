@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 func TestLoadFieldMappingsYAMLAndTransforms(t *testing.T) {
@@ -111,6 +111,41 @@ func TestLoadServerTLSConfigSubjectValidation(t *testing.T) {
 	}
 	if err := cfg.VerifyConnection(tlsState(badCert)); err == nil {
 		t.Fatal("expected VerifyConnection to reject mismatched CN")
+	}
+}
+
+func TestLoadServerTLSConfigSubjectRegexValidation(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile, caFile, err := writeTLSFixture(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadServerTLSConfig(ServerTLSOptions{
+		CertFile:  certFile,
+		KeyFile:   keyFile,
+		CAFile:    caFile,
+		AllowedCN: []string{"regex:^client-[0-9]+$"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := &x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: "client-42",
+		},
+	}
+	if err := cfg.VerifyConnection(tlsState(cert)); err != nil {
+		t.Fatalf("VerifyConnection() error = %v", err)
+	}
+
+	blocked := &x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: "worker-1",
+		},
+	}
+	if err := cfg.VerifyConnection(tlsState(blocked)); err == nil {
+		t.Fatal("expected VerifyConnection to reject non-matching CN regex")
 	}
 }
 

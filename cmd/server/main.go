@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mzinal/loglugger/internal/server"
+	"github.com/ydb-platform/loglugger/internal/server"
 )
 
 type serverConfig struct {
@@ -66,6 +66,7 @@ func main() {
 	mapper := server.NewMapper(mappings)
 	handler := server.NewHandler(positions, mapper, writer, fullTablePath(cfg.YDBDatabase, cfg.YDBTable))
 	mux := http.NewServeMux()
+	mux.Handle("/v1/positions", handler)
 	mux.Handle("/v1/batches", handler)
 
 	tlsConfig, err := server.LoadServerTLSConfig(server.ServerTLSOptions{

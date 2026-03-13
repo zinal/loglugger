@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 // Sender sends batches to the server via HTTP.
@@ -118,31 +118,51 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 }
 
 func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.positionURL+"?client_id="+url.QueryEscape(s.clientID), nil)
-	if err != nil {
-		return nil, err
-	}
+	var lastErr error
+	for attempt := 0; attempt <= s.retryMax; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(s.retryDelay * time.Duration(1<<uint(attempt-1))):
+			}
+		}
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.positionURL+"?client_id="+url.QueryEscape(s.clientID), nil)
+		if err != nil {
+			return nil, err
+		}
 
-	body, _ := io.ReadAll(resp.Body)
-	var positionResp models.PositionResponse
-	if err := json.Unmarshal(body, &positionResp); err != nil {
-		return nil, fmt.Errorf("decode position response: %w", err)
-	}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			lastErr = err
+			slog.Debug("fetch position failed", "attempt", attempt+1, "error", err)
+			continue
+		}
 
-	switch resp.StatusCode {
-	case http.StatusOK:
-		return &positionResp, nil
-	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
-		return &positionResp, ErrClientError{Message: positionResp.Message}
-	default:
-		return &positionResp, fmt.Errorf("HTTP %d: %s", resp.StatusCode, positionResp.Message)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		var positionResp models.PositionResponse
+		if err := json.Unmarshal(body, &positionResp); err != nil {
+			lastErr = fmt.Errorf("decode position response: %w", err)
+			continue
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			return &positionResp, nil
+		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+			return &positionResp, ErrClientError{Message: positionResp.Message}
+		default:
+			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, positionResp.Message)
+			if resp.StatusCode >= 500 {
+				continue
+			}
+			return &positionResp, lastErr
+		}
 	}
+	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
 }
 
 // ErrClientError indicates a client error (4xx) that should not be retried.

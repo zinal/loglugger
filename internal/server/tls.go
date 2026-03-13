@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
+	"regexp"
+	"strings"
 )
 
 type ServerTLSOptions struct {
@@ -49,13 +50,13 @@ func LoadServerTLSConfig(opts ServerTLSOptions) (*tls.Config, error) {
 				return fmt.Errorf("missing client certificate")
 			}
 			subject := state.PeerCertificates[0].Subject
-			if len(opts.AllowedCN) > 0 && !slices.Contains(opts.AllowedCN, subject.CommonName) {
+			if len(opts.AllowedCN) > 0 && !matchesAllowed(subject.CommonName, opts.AllowedCN) {
 				return fmt.Errorf("client certificate common name %q is not allowed", subject.CommonName)
 			}
-			if len(opts.AllowedO) > 0 && !containsAny(subject.Organization, opts.AllowedO) {
+			if len(opts.AllowedO) > 0 && !containsAnyMatch(subject.Organization, opts.AllowedO) {
 				return fmt.Errorf("client certificate organization is not allowed")
 			}
-			if len(opts.AllowedOU) > 0 && !containsAny(subject.OrganizationalUnit, opts.AllowedOU) {
+			if len(opts.AllowedOU) > 0 && !containsAnyMatch(subject.OrganizationalUnit, opts.AllowedOU) {
 				return fmt.Errorf("client certificate organizational unit is not allowed")
 			}
 			return nil
@@ -94,9 +95,29 @@ func loadServerCertPool(caFile, caPath string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-func containsAny(values []string, allowed []string) bool {
+func containsAnyMatch(values []string, allowed []string) bool {
 	for _, value := range values {
-		if slices.Contains(allowed, value) {
+		if matchesAllowed(value, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesAllowed(value string, allowed []string) bool {
+	for _, candidate := range allowed {
+		if strings.HasPrefix(candidate, "regex:") {
+			pattern := strings.TrimPrefix(candidate, "regex:")
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				continue
+			}
+			if re.MatchString(value) {
+				return true
+			}
+			continue
+		}
+		if candidate == value {
 			return true
 		}
 	}

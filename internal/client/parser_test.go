@@ -3,7 +3,7 @@ package client
 import (
 	"testing"
 
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 func TestMessageParser_Parse(t *testing.T) {

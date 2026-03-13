@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 // Batch holds records and position info.

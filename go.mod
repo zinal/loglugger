@@ -1,4 +1,4 @@
-module github.com/mzinal/loglugger
+module github.com/ydb-platform/loglugger
 
 go 1.23.9
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 type journalReader struct {

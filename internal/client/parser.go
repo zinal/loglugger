@@ -3,7 +3,7 @@ package client
 import (
 	"regexp"
 
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 // NoMatchAction defines behavior when regex does not match.

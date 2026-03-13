@@ -7,7 +7,7 @@ import (
 	"mime"
 	"net/http"
 
-	"github.com/mzinal/loglugger/internal/models"
+	"github.com/ydb-platform/loglugger/internal/models"
 )
 
 // Handler handles batch submission requests.
@@ -82,6 +82,11 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 	if req.NextPosition == "" {
 		return &models.BatchResponse{Status: "error", Message: "next_position is required"}
 	}
+	for i := range req.Records {
+		if err := validateRecord(req.Records[i]); err != nil {
+			return &models.BatchResponse{Status: "error", Message: fmt.Sprintf("invalid records[%d]: %v", i, err)}
+		}
+	}
 
 	if req.Reset {
 		if len(req.Records) > 0 {
@@ -126,6 +131,19 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 		return &models.BatchResponse{Status: "error", Message: fmt.Sprintf("store next position: %v", err)}
 	}
 	return &models.BatchResponse{Status: "ok", NextPosition: req.NextPosition}
+}
+
+func validateRecord(rec models.Record) error {
+	hasMessage := rec.Message != ""
+	hasParsed := len(rec.Parsed) > 0
+	switch {
+	case hasMessage && hasParsed:
+		return fmt.Errorf("record must include either message or parsed, not both")
+	case !hasMessage && !hasParsed:
+		return fmt.Errorf("record must include message or parsed")
+	default:
+		return nil
+	}
 }
 
 func (h *Handler) mapRecords(clientID string, records []models.Record) ([]map[string]interface{}, error) {
