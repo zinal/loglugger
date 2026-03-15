@@ -15,7 +15,6 @@ ExecStart=/opt/ydb/loglugger/bin/loglugger-client \
   -batch-timeout ${LOGLUGGER_BATCH_TIMEOUT} \
   -http-timeout ${LOGLUGGER_HTTP_TIMEOUT} \
   -retry-delay ${LOGLUGGER_RETRY_DELAY} \
-  -debug ${LOGLUGGER_DEBUG} \
   -tls-ca-file ${LOGLUGGER_TLS_CA_FILE} \
   -tls-cert-file ${LOGLUGGER_TLS_CERT_FILE} \
   -tls-key-file ${LOGLUGGER_TLS_KEY_FILE}
