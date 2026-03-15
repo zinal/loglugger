@@ -199,7 +199,7 @@ func newWriter(cfg serverConfig) (server.Writer, error) {
 			context.Background(),
 			cfg.YDBEndpoint,
 			cfg.YDBDatabase,
-			fullTablePath(cfg.YDBDatabase, cfg.PositionTable),
+			cfg.PositionTable,
 			ydbAuthConfig(cfg),
 		)
 	default:

@@ -85,10 +85,9 @@ func (w *YDBWriter) Close(ctx context.Context) error {
 func (w *YDBWriter) GetPosition(ctx context.Context, clientID string) (string, bool, error) {
 	var expectedPosition string
 	var found bool
-	err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
-		_, result, err := session.Execute(
+	err := w.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		result, err := tx.Execute(
 			ctx,
-			table.SerializableReadWriteTxControl(table.CommitTx()),
 			fmt.Sprintf(`
 DECLARE $client_id AS Utf8;
 SELECT expected_position
@@ -112,7 +111,9 @@ LIMIT 1;
 			found = true
 		}
 		return result.Err()
-	})
+	},
+		table.WithIdempotent(),
+	)
 	if err != nil {
 		return "", false, fmt.Errorf("get expected position from %s: %w", w.positionTable, err)
 	}
@@ -120,24 +121,23 @@ LIMIT 1;
 }
 
 func (w *YDBWriter) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
-	err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
-		_, _, err := session.Execute(
+	err := w.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		_, err := tx.Execute(
 			ctx,
-			table.SerializableReadWriteTxControl(table.CommitTx()),
 			fmt.Sprintf(`
 DECLARE $client_id AS Utf8;
 DECLARE $old_expected_position AS Utf8;
 DECLARE $new_expected_position AS Utf8;
 
-$current_position = COALESCE((
+$current_position = (
     SELECT expected_position
     FROM %s
     WHERE client_id = $client_id
     LIMIT 1
-), "");
+);
 
 SELECT Ensure(
-    $current_position == $old_expected_position,
+    COALESCE($current_position, "") == $old_expected_position,
     "position mismatch"
 );
 
@@ -151,7 +151,9 @@ VALUES ($client_id, $new_expected_position);
 				Build(),
 		)
 		return err
-	})
+	},
+		table.WithIdempotent(),
+	)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "position mismatch") {
 			current, found, getErr := w.GetPosition(ctx, clientID)
@@ -166,10 +168,9 @@ VALUES ($client_id, $new_expected_position);
 }
 
 func (w *YDBWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string) error {
-	err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
-		_, _, err := session.Execute(
+	err := w.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		_, err := tx.Execute(
 			ctx,
-			table.SerializableReadWriteTxControl(table.CommitTx()),
 			fmt.Sprintf(`
 DECLARE $client_id AS Utf8;
 DECLARE $new_expected_position AS Utf8;
@@ -183,7 +184,9 @@ VALUES ($client_id, $new_expected_position);
 				Build(),
 		)
 		return err
-	})
+	},
+		table.WithIdempotent(),
+	)
 	if err != nil {
 		return fmt.Errorf("store expected position in %s: %w", w.positionTable, err)
 	}
