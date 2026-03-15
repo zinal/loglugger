@@ -1,13 +1,13 @@
 # Loglugger
 
-A two-component system for collecting log records from systemd journald and persisting them to a backend (YDB or mock for testing).
+A two-component system for collecting records from systemd journald and storing them in a target backend (YDB or a mock backend for testing).
 
 See [SPECIFICATION.md](SPECIFICATION.md) for the formal specification.
 
 ## Components
 
-- **Client** (`cmd/client`): Reads from journald, optionally parses messages with regex, batches records, and sends to the server via HTTP.
-- **Server** (`cmd/server`): Accepts batches, validates position continuity, maps fields, and writes to a store (MockWriter by default).
+- **Client** (`cmd/client`): Reads records from journald, optionally parses messages with a regular expression, groups them into batches, and sends them to the server over HTTP.
+- **Server** (`cmd/server`): Accepts batches, validates position continuity, maps fields, and writes them to storage (`MockWriter` by default).
 
 ## Build
 
@@ -16,22 +16,22 @@ sudo apt-get install -y libsystemd-dev  # or your operating system equivalent
 ./build.sh
 ```
 
-The client requires Linux for journald support. On macOS/Windows, the client will fail at startup with "journald is only supported on Linux".
+The client requires Linux for journald support. On macOS and Windows, the client fails at startup with "journald is only supported on Linux".
 
-After building, use `./bin/server` and `./bin/client` in the run commands below.
+After building, use `./bin/loglugger-server` and `./bin/loglugger-client` in the run commands below.
 
 ## Run
 
 **Server** (TLS + mTLS required):
 ```bash
-./bin/server -config examples/config/server.yaml
+./bin/loglugger-server -config examples/config/server.yaml
 ```
 
-Server config file:
+Server configuration:
 
-- Most server settings are now loaded from YAML/JSON config passed with `-config`.
+- Most server settings are loaded from a YAML/JSON file passed with `-config`.
 - See `examples/config/server.yaml` for all supported keys.
-- Optional CLI override: `-listen :27312` (overrides `listen_addr` from config).
+- Optional CLI override: `-listen :27312` (overrides `listen_addr` from the configuration file).
 - The client fetches its startup position from `GET /v1/positions?client_id=...` and does not keep a local position file.
 - Request-size protection is configurable:
   - `max_compressed_body_bytes`: maximum raw HTTP request body size before decoding `Content-Encoding`.
@@ -40,7 +40,7 @@ Server config file:
 
 **Client** (Linux only):
 ```bash
-./bin/client \
+./bin/loglugger-client \
   -server https://localhost:27312 \
   -client-id myhost \
   -tls-ca-file certs/ca.crt \
@@ -53,23 +53,23 @@ Useful client flags:
 - `-service-mask nginx.service` uses exact systemd unit matching.
 - `-service-mask 'nginx*.service'` uses glob matching.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
-- `-server https://a:27312,https://b:27312` configures multiple endpoints; client uses sticky endpoint selection and switches to the next endpoint only after transient failure (`5xx` or network error).
+- `-server https://a:27312,https://b:27312` configures multiple endpoints; the client keeps using the current endpoint while requests succeed and switches to the next one only after a transient failure (`5xx` or network error).
 - `-tls-ca-file` and `-tls-use-system-pool` control the client trust store.
 - Client batches are additionally limited to 10 MB of uncompressed log data per request.
-- If a single record exceeds 10 MB, it is sent as a single-record request (not dropped).
+- If a single record exceeds 10 MB, it is sent as a single-record request and is not dropped.
 
 ### Example Mapping Files
 
-- `examples/mappings/basic.yaml` is a readable starter mapping for local mock or YDB-backed runs.
-- `examples/mappings/ydb.json` is the same idea in JSON and is convenient when wiring the YDB writer.
-- Mapper supports computed sources:
+- `examples/mappings/basic.yaml` is a baseline mapping file for local runs with the mock backend or YDB.
+- `examples/mappings/ydb.json` follows the same approach in JSON and is convenient when configuring the YDB writer.
+- The mapper supports computed source fields:
   - `log_timestamp_us`: microsecond record timestamp that maps to YDB `Timestamp64` via `transform: timestamp64_us`.
-  - `message_cityhash64`: `CityHash64` over full record payload, typically mapped to `message_hash` (`Uint64`) for uniqueness.
-- YDB-oriented example mapping/table are in `examples/ydbd/field_mapping.yaml` and `examples/ydbd/target_table.sql`.
+  - `message_cityhash64`: `CityHash64` over the full record payload, typically mapped to `message_hash` (`Uint64`) to preserve uniqueness.
+- YDB-specific examples for schema and mapping are provided in `examples/ydbd/field_mapping.yaml` and `examples/ydbd/target_table.sql`.
 
 ### Local mTLS Setup
 
-The following `openssl` commands generate a local CA plus server/client certificates that work with the sample mTLS server.
+The following `openssl` commands generate a local CA, together with server and client certificates, for the sample mTLS setup.
 
 ```bash
 mkdir -p certs
@@ -98,25 +98,25 @@ openssl x509 -req -in certs/client.csr \
   -out certs/client.crt -days 825 -sha256
 ```
 
-If you want the server to enforce client subject checks as well as CA trust, start it with:
+If you need the server to enforce client subject checks in addition to CA trust, start it with:
 
 ```bash
-./bin/server -config examples/config/server.yaml
+./bin/loglugger-server -config examples/config/server.yaml
 ```
 
 When using `tls_client_subject_cn`, `tls_client_subject_o`, or `tls_client_subject_ou` with entries like `regex:<pattern>`:
 
-- Regexes are compiled and validated at server startup.
-- Invalid regex patterns now fail fast with a config error (instead of being ignored at handshake time).
+- Regular expressions are compiled and validated at server startup.
+- Invalid patterns now fail fast with a configuration error instead of being ignored during the TLS handshake.
 
-For a local mock-backed end-to-end run:
+For a local end-to-end run with the mock backend:
 
 ```bash
-./bin/server -config examples/config/server.yaml
+./bin/loglugger-server -config examples/config/server.yaml
 ```
 
 ```bash
-./bin/client \
+./bin/loglugger-client \
   -server https://localhost:27312 \
   -client-id myhost \
   -tls-ca-file certs/ca.crt \
@@ -130,20 +130,20 @@ For a local mock-backed end-to-end run:
 go test ./...
 ```
 
-Includes unit tests for parser, batcher, models, handler, and a functional test that exercises the full client-server flow.
+The test suite includes unit tests for `parser`, `batcher`, `models`, and `handler`, together with a functional test that exercises the full client-server flow.
 
 ## YDB Integration
 
-The server supports `writer_backend: ydb` and uses `github.com/ydb-platform/ydb-go-sdk/v3` for `BulkUpsert`. Supply `ydb_endpoint`, `ydb_database`, and `ydb_table` in the config when enabling the YDB backend. Position storage backend is selected automatically by `writer_backend` (`mock` -> in-memory positions, `ydb` -> YDB positions via `position_table`). `MockWriter` remains available for tests and local dry runs.
+The server supports `writer_backend: ydb` and uses `github.com/ydb-platform/ydb-go-sdk/v3` for `BulkUpsert`. When enabling the YDB backend, set `ydb_endpoint`, `ydb_database`, and `ydb_table` in the configuration file. The position storage backend is selected automatically from `writer_backend` (`mock` -> in-memory positions, `ydb` -> YDB-backed positions via `position_table`). `MockWriter` remains available for tests and local runs.
 
 Supported YDB auth modes:
 
 - `anonymous` (default)
 - `static` via `ydb_auth_login` + `ydb_auth_password`
 - `service-account-key` via `ydb_auth_sa_key_file`
-- `metadata` (instance metadata credentials, optional `ydb_auth_metadata_url`)
+- `metadata` (instance metadata service credentials, optional `ydb_auth_metadata_url`)
 
-Optional YDB TLS CA certificate path:
+Optional path to a YDB TLS CA certificate:
 
 - `ydb_ca_path` points to a PEM file with CA certificates used to validate YDB TLS.
 
@@ -166,10 +166,10 @@ Example YDB run:
 # ydb_database: /local
 # ydb_table: logs
 # field_mapping_file: examples/mappings/ydb.json
-./bin/server -config examples/config/server.yaml
+./bin/loglugger-server -config examples/config/server.yaml
 ```
 
-YDB schema/mapping notes:
+Notes on YDB schema and mapping:
 
 - In `examples/ydbd/target_table.sql`, `log_timestamp_us` and `ts_orig` use `Timestamp64`.
 - In `examples/ydbd/field_mapping.yaml`, use:
@@ -177,5 +177,5 @@ YDB schema/mapping notes:
   - `transform: timestamp64` for parsed datetime strings (e.g., `parsed.P_DTTM` -> `ts_orig`)
 - `convert_time_to_local_tz` (server config, default `false`) changes how timezone-less `timestamp64` values are parsed:
   - `false`: interpret as UTC
-  - `true`: interpret in OS local timezone before saving (useful but dangerous when timezone config is inconsistent across hosts)
-- `message_regex` and `message_regex_no_match` are server-side settings now (configured in server YAML/JSON).
+  - `true`: interpret in the OS local timezone before saving (useful, but risky when timezone configuration differs across hosts)
+- `message_regex` and `message_regex_no_match` are now configured on the server in YAML/JSON configuration.
