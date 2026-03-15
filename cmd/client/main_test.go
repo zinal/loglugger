@@ -225,7 +225,3 @@ func (r *stubJournalReader) SeekToPosition(ctx context.Context, position string)
 func (r *stubJournalReader) Next(ctx context.Context) (*client.JournalEntry, error) {
 	return nil, nil
 }
-
-func (r *stubJournalReader) GetCursor() (string, error) {
-	return "", nil
-}

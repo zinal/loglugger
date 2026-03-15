@@ -122,13 +122,6 @@ func journalEntryToRecord(e *sdjournal.JournalEntry) models.Record {
 	return rec
 }
 
-func (r *journalReader) GetCursor() (string, error) {
-	if r.last != "" {
-		return r.last, nil
-	}
-	return r.j.GetCursor()
-}
-
 func (r *journalReader) Close() error {
 	if r.j != nil {
 		return r.j.Close()

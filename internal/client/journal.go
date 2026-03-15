@@ -19,8 +19,6 @@ type JournalReader interface {
 	SeekToPosition(ctx context.Context, position string) error
 	// Next reads the next entry. Returns nil when no more entries (would block).
 	Next(ctx context.Context) (*JournalEntry, error)
-	// GetCursor returns the current cursor (for position tracking).
-	GetCursor() (string, error)
 }
 
 // JournalConfig configures the journal reader.

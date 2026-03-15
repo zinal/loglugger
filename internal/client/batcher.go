@@ -20,7 +20,6 @@ type Batcher interface {
 	Add(entry *JournalEntry)
 	Flush() *Batch
 	ShouldFlush() bool
-	Timeout() time.Duration
 }
 
 type batcher struct {
@@ -103,10 +102,6 @@ func (b *batcher) ShouldFlush() bool {
 		return true
 	}
 	return b.dataBytes >= b.maxDataBytes
-}
-
-func (b *batcher) Timeout() time.Duration {
-	return b.timeout
 }
 
 func recordLogDataSize(record models.Record) int {
