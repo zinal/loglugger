@@ -11,7 +11,7 @@ This folder contains a complete `ydbd`-oriented Loglugger example:
 
 ### Mapping Notes
 
-- parser regex is configured on server (`loglugger-server.yaml`, `message_regex`):
+- parser regexes are configured on server (`loglugger-server.yaml`, `message_regex`, `systemd_unit_regex`):
   `^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*).*$`
 - fallback `level=unknown` when parser fields are absent.
 - source is systemd journald records filtered by unit mask.

@@ -33,6 +33,7 @@ type serverConfig struct {
 	PositionTable            string   `json:"position_table" yaml:"position_table"`
 	FieldMappingFile         string   `json:"field_mapping_file" yaml:"field_mapping_file"`
 	MessageRegex             string   `json:"message_regex" yaml:"message_regex"`
+	SystemdUnitRegex         string   `json:"systemd_unit_regex" yaml:"systemd_unit_regex"`
 	MessageRegexNoMatch      string   `json:"message_regex_no_match" yaml:"message_regex_no_match"`
 	ConvertTimeToLocalTZ     bool     `json:"convert_time_to_local_tz" yaml:"convert_time_to_local_tz"`
 	TLSCertFile              string   `json:"tls_cert_file" yaml:"tls_cert_file"`
@@ -71,7 +72,11 @@ func main() {
 	mapper := server.NewMapperWithOptions(mappings, server.MapperOptions{
 		ConvertTimeToLocalTZ: cfg.ConvertTimeToLocalTZ,
 	})
-	parser, err := server.NewMessageParser(cfg.MessageRegex, server.NoMatchAction(cfg.MessageRegexNoMatch))
+	parser, err := server.NewRecordParser(
+		cfg.MessageRegex,
+		server.NoMatchAction(cfg.MessageRegexNoMatch),
+		cfg.SystemdUnitRegex,
+	)
 	if err != nil {
 		slog.Error("create server parser", "error", err)
 		os.Exit(1)

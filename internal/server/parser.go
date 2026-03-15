@@ -20,19 +20,48 @@ type MessageParser interface {
 }
 
 type messageParser struct {
-	re         *regexp.Regexp
-	noMatch    NoMatchAction
-	groupNames []string
+	messageRe             *regexp.Regexp
+	messageGroupNames     []string
+	systemdUnitRe         *regexp.Regexp
+	systemdUnitGroupNames []string
+	noMatch               NoMatchAction
 }
 
 // NewMessageParser creates a message parser. If regexStr is empty, returns nil (no parsing).
 func NewMessageParser(regexStr string, noMatch NoMatchAction) (MessageParser, error) {
-	if regexStr == "" {
+	return NewRecordParser(regexStr, noMatch, "")
+}
+
+// NewRecordParser creates a parser for optional message/systemd unit regex extraction.
+// If both regexes are empty, returns nil (no parsing).
+func NewRecordParser(messageRegex string, noMatch NoMatchAction, systemdUnitRegex string) (MessageParser, error) {
+	messageRe, messageGroupNames, err := compileNamedRegex(messageRegex)
+	if err != nil {
+		return nil, err
+	}
+	systemdUnitRe, systemdUnitGroupNames, err := compileNamedRegex(systemdUnitRegex)
+	if err != nil {
+		return nil, err
+	}
+	if messageRe == nil && systemdUnitRe == nil {
 		return nil, nil
+	}
+	return &messageParser{
+		messageRe:             messageRe,
+		messageGroupNames:     messageGroupNames,
+		systemdUnitRe:         systemdUnitRe,
+		systemdUnitGroupNames: systemdUnitGroupNames,
+		noMatch:               noMatch,
+	}, nil
+}
+
+func compileNamedRegex(regexStr string) (*regexp.Regexp, []string, error) {
+	if regexStr == "" {
+		return nil, nil, nil
 	}
 	re, err := regexp.Compile(regexStr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	names := re.SubexpNames()
 	groupNames := make([]string, 0, len(names))
@@ -41,25 +70,44 @@ func NewMessageParser(regexStr string, noMatch NoMatchAction) (MessageParser, er
 			groupNames = append(groupNames, n)
 		}
 	}
-	return &messageParser{re: re, noMatch: noMatch, groupNames: groupNames}, nil
+	return re, groupNames, nil
 }
 
 func (p *messageParser) Parse(rec models.Record) (models.Record, bool) {
-	matches := p.re.FindStringSubmatch(rec.Message)
-	if matches == nil {
-		if p.noMatch == NoMatchSkip {
-			return models.Record{}, false
-		}
-		return rec, true
-	}
-	parsed := make(map[string]string)
-	for _, name := range p.groupNames {
-		idx := p.re.SubexpIndex(name)
-		if idx >= 0 && idx < len(matches) && matches[idx] != "" {
-			parsed[name] = matches[idx]
-		}
-	}
 	out := rec
-	out.Parsed = parsed
+
+	if p.messageRe != nil {
+		matches := p.messageRe.FindStringSubmatch(rec.Message)
+		if matches == nil {
+			if p.noMatch == NoMatchSkip {
+				return models.Record{}, false
+			}
+		} else {
+			p.extractNamedGroups(&out, p.messageRe, p.messageGroupNames, matches)
+		}
+	}
+
+	if p.systemdUnitRe != nil {
+		matches := p.systemdUnitRe.FindStringSubmatch(rec.SystemdUnit)
+		if matches != nil {
+			p.extractNamedGroups(&out, p.systemdUnitRe, p.systemdUnitGroupNames, matches)
+		}
+	}
+
 	return out, true
+}
+
+func (p *messageParser) extractNamedGroups(rec *models.Record, re *regexp.Regexp, names []string, matches []string) {
+	if rec.Parsed == nil {
+		rec.Parsed = make(map[string]string)
+	}
+	for _, name := range names {
+		idx := re.SubexpIndex(name)
+		if idx >= 0 && idx < len(matches) && matches[idx] != "" {
+			if _, exists := rec.Parsed[name]; exists {
+				continue
+			}
+			rec.Parsed[name] = matches[idx]
+		}
+	}
 }

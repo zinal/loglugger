@@ -311,14 +311,15 @@ field_mapping:
 
 ### 5.6 Server-Side Message Parsing (Optional)
 
-Before mapping, the server may parse incoming `message` using a configurable regex with named capture groups:
+Before mapping, the server may parse incoming `message` and `_SYSTEMD_UNIT` using configurable regexes with named capture groups:
 
 - `message_regex`: regex pattern with named groups (e.g., `(?P<P_DTTM>...)`).
+- `systemd_unit_regex`: regex pattern with named groups applied to `systemd_unit` (e.g., `(?P<P_UNIT_NAME>...)`).
 - `message_regex_no_match`: behavior when regex does not match:
   - `send_raw` (default): keep the record and map raw `message`.
   - `skip`: drop the record from the batch before write.
 
-Parsed groups are available to field mapping as `parsed.<GROUP_NAME>` but are not included in the protocol payload.
+Parsed groups from both regexes are merged and available to field mapping as `parsed.<GROUP_NAME>` but are not included in the protocol payload.
 
 ### 5.7 Position Storage
 
@@ -448,6 +449,7 @@ loglugger/
 | **Field mapping** | | | |
 | field_mapping_file | string | — | Path to YAML/JSON file with source→destination field mappings |
 | message_regex | string | "" | Regex with named groups for server-side MESSAGE parsing. Empty = parsing disabled |
+| systemd_unit_regex | string | "" | Regex with named groups for server-side `_SYSTEMD_UNIT` parsing. Empty = parsing disabled |
 | message_regex_no_match | string | send_raw | Server behavior when regex does not match: `send_raw` or `skip` |
 | convert_time_to_local_tz | bool | false | Parse timezone-less `timestamp64` values in OS local timezone before writing (dangerous if timezone config differs across hosts) |
 | **TLS** | | | |

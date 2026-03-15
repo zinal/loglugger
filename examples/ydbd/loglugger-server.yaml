@@ -8,6 +8,7 @@ max_decompressed_body_bytes: 33554432
 position_table: "loglugger_positions"
 field_mapping_file: "/opt/ydb/loglugger/config/field_mapping.yaml"
 message_regex: '^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*).*$'
+systemd_unit_regex: '^ydbd-(?P<P_DBNAME>[^-]+)-.*\.service$'
 message_regex_no_match: "send_raw" # send_raw|skip
 # Parse timezone-less timestamps using OS local timezone before saving.
 # Useful for local-time log formats, but dangerous if hosts/timezones are inconsistent.

@@ -178,4 +178,5 @@ Notes on YDB schema and mapping:
 - `convert_time_to_local_tz` (server config, default `false`) changes how timezone-less `timestamp64` values are parsed:
   - `false`: interpret as UTC
   - `true`: interpret in the OS local timezone before saving (useful, but risky when timezone configuration differs across hosts)
-- `message_regex` and `message_regex_no_match` are now configured on the server in YAML/JSON configuration.
+- `message_regex`, `systemd_unit_regex`, and `message_regex_no_match` are configured on the server in YAML/JSON configuration.
+- Named groups from both regexes are merged into the same `parsed.*` namespace and can be used by field mapping.
