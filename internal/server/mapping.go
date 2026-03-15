@@ -82,10 +82,6 @@ func (m *mapper) MapRecord(clientID string, rec models.Record) (map[string]inter
 		}
 		row[fm.Destination] = value
 	}
-	// Always include client_id if not already set by mapping
-	if _, has := row["client_id"]; !has && clientID != "" {
-		row["client_id"] = clientID
-	}
 	return row, nil
 }
 
