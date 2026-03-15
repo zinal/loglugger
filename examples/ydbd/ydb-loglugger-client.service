@@ -10,7 +10,6 @@ Group=root
 EnvironmentFile=-/etc/default/ydb-loglugger-client
 ExecStart=/opt/ydb/loglugger/bin/loglugger-client \
   -server ${LOGLUGGER_SERVER_URL} \
-  -client-id ${LOGLUGGER_CLIENT_ID} \
   -service-mask ${LOGLUGGER_SERVICE_MASK} \
   -batch-size ${LOGLUGGER_BATCH_SIZE} \
   -batch-timeout ${LOGLUGGER_BATCH_TIMEOUT} \

@@ -91,11 +91,11 @@ openssl x509 -req -in certs/server.csr \
 
 openssl ecparam -name prime256v1 -genkey -noout -out certs/client.key
 openssl req -new -key certs/client.key \
-  -subj "/CN=client-local/O=dev/OU=local" \
+  -subj "/CN=loglugger-client/O=dev/OU=ydb" \
   -out certs/client.csr
 openssl x509 -req -in certs/client.csr \
   -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
-  -out certs/client.crt -days 825 -sha256
+  -out certs/client.crt -days 1825 -sha256
 ```
 
 Если требуется, чтобы сервер проверял не только доверие к CA, но и атрибуты Subject клиентского сертификата, запускайте его так:
