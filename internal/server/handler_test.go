@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/ydb-platform/loglugger/internal/models"
@@ -62,7 +64,7 @@ func TestHandler_ResetBatch(t *testing.T) {
 func TestHandler_PositionMismatch(t *testing.T) {
 	ctx := context.Background()
 	positions := NewMemoryPositionStore()
-	_ = positions.Set(ctx, "client-1", "expected-pos")
+	_ = positions.Set(ctx, "client-1", "", "expected-pos")
 
 	mapper := NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}})
 	writer := NewMockWriter()
@@ -202,7 +204,7 @@ func TestHandler_FieldMappingParsed(t *testing.T) {
 func TestHandler_GetPositionFound(t *testing.T) {
 	ctx := context.Background()
 	positions := NewMemoryPositionStore()
-	_ = positions.Set(ctx, "client-1", "cursor-9")
+	_ = positions.Set(ctx, "client-1", "", "cursor-9")
 	handler := NewHandler(positions, NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
 
 	w := httptest.NewRecorder()
@@ -263,7 +265,7 @@ func TestHandler_ContentTypeWithCharset(t *testing.T) {
 func TestHandler_WriteFailureDoesNotAdvancePosition(t *testing.T) {
 	ctx := context.Background()
 	positions := NewMemoryPositionStore()
-	_ = positions.Set(ctx, "client-1", "pos-1")
+	_ = positions.Set(ctx, "client-1", "", "pos-1")
 	handler := NewHandler(positions, NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), errorWriter{err: errors.New("boom")}, "logs")
 
 	resp := handler.handle(ctx, &models.BatchRequest{
@@ -355,6 +357,64 @@ func TestHandler_RejectsUnsupportedContentEncoding(t *testing.T) {
 	}
 }
 
+func TestHandler_ConcurrentDifferentClients(t *testing.T) {
+	positions := NewMemoryPositionStore()
+	mapper := NewMapper([]FieldMapping{
+		{Source: "message", Destination: "msg"},
+		{Source: "client_id", Destination: "client_id"},
+	})
+	writer := NewMockWriter()
+	handler := NewHandler(positions, mapper, writer, "logs")
+
+	const workers = 32
+	const totalRequests = 200
+
+	var wg sync.WaitGroup
+	errCh := make(chan string, totalRequests)
+	for i := 0; i < totalRequests; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			clientID := "client-" + strconv.Itoa(i)
+			req := &models.BatchRequest{
+				ClientID:     clientID,
+				Reset:        true,
+				NextPosition: "pos-" + clientID + "-" + strconv.Itoa(i),
+				Records:      []models.Record{{Message: "m-" + strconv.Itoa(i)}},
+			}
+			body, _ := json.Marshal(req)
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				errCh <- "unexpected status code"
+				return
+			}
+			var resp models.BatchResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				errCh <- "decode response failed"
+				return
+			}
+			if resp.Status != "ok" {
+				errCh <- "unexpected response status"
+			}
+		}(i)
+		if (i+1)%workers == 0 {
+			// Keep a bounded amount of concurrent goroutines for stable CI runtime.
+			wg.Wait()
+		}
+	}
+	wg.Wait()
+	close(errCh)
+	for errMsg := range errCh {
+		t.Fatal(errMsg)
+	}
+	if len(writer.Rows) != totalRequests {
+		t.Fatalf("rows = %d, want %d", len(writer.Rows), totalRequests)
+	}
+}
+
 func gzipData(t *testing.T, in []byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -389,6 +449,6 @@ func (s positionStoreStub) Get(ctx context.Context, clientID string) (string, bo
 	return s.getPos, s.getOK, s.getErr
 }
 
-func (s positionStoreStub) Set(ctx context.Context, clientID, position string) error {
+func (s positionStoreStub) Set(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
 	return s.setErr
 }

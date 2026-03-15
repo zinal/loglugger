@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -120,6 +121,13 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 	}
 
 	if req.Reset {
+		expected, ok, err := h.positions.Get(ctx, req.ClientID)
+		if err != nil {
+			return &models.BatchResponse{Status: "error", Message: err.Error()}
+		}
+		if !ok {
+			expected = ""
+		}
 		if len(req.Records) > 0 {
 			rows, err := h.mapRecords(req.ClientID, req.Records)
 			if err != nil {
@@ -129,7 +137,10 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 				return &models.BatchResponse{Status: "error", Message: err.Error()}
 			}
 		}
-		if err := h.positions.Set(ctx, req.ClientID, req.NextPosition); err != nil {
+		if err := h.positions.Set(ctx, req.ClientID, expected, req.NextPosition); err != nil {
+			if resp := h.positionMismatchResponse(err); resp != nil {
+				return resp
+			}
 			return &models.BatchResponse{Status: "error", Message: fmt.Sprintf("store next position: %v", err)}
 		}
 		return &models.BatchResponse{Status: "ok", NextPosition: req.NextPosition}
@@ -158,10 +169,28 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 			return &models.BatchResponse{Status: "error", Message: err.Error()}
 		}
 	}
-	if err := h.positions.Set(ctx, req.ClientID, req.NextPosition); err != nil {
+	if err := h.positions.Set(ctx, req.ClientID, expected, req.NextPosition); err != nil {
+		if resp := h.positionMismatchResponse(err); resp != nil {
+			return resp
+		}
 		return &models.BatchResponse{Status: "error", Message: fmt.Sprintf("store next position: %v", err)}
 	}
 	return &models.BatchResponse{Status: "ok", NextPosition: req.NextPosition}
+}
+
+func (h *Handler) positionMismatchResponse(err error) *models.BatchResponse {
+	var mismatch *PositionMismatchError
+	if errors.As(err, &mismatch) {
+		expected := ""
+		if mismatch.Found {
+			expected = mismatch.CurrentPosition
+		}
+		return &models.BatchResponse{
+			Status:           "position_mismatch",
+			ExpectedPosition: expected,
+		}
+	}
+	return nil
 }
 
 func validateRecord(rec models.Record) error {

@@ -182,7 +182,7 @@ func TestMapper_TimestampWithZoneConvertedToLocalWhenEnabled(t *testing.T) {
 
 func TestQuoteYDBPath(t *testing.T) {
 	got := quoteYDBPath("/local/path`withtick")
-	want := "`/local/path``withtick`"
+	want := "`/local/path_withtick`"
 	if got != want {
 		t.Fatalf("quoteYDBPath() = %q, want %q", got, want)
 	}

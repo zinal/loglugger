@@ -122,6 +122,7 @@ The client sends raw `message` to the server. Parsing is performed on the server
 4. Map source fields to destination table columns using the configured field mapping.
 5. Persist batches to the configured backend (`mock` for testing, or `ydb` for the actual usage).
 6. Return appropriate responses including position information or errors.
+7. Process requests from different clients concurrently.
 
 ### 5.2 HTTP API
 
@@ -243,6 +244,8 @@ RETURN 200 with next_position
 ```
 
 **Durability requirement**: The server **must write log records before updating the stored position**. This ordering is required to avoid the risk of losing records by advancing the position past data that was not successfully persisted.
+
+**Concurrency requirement**: The server **must support concurrent processing of requests from different clients**. Implementations must avoid global serialization of all batch requests, and must preserve per-client position safety under concurrent load.
 
 ### 5.4 YDB Integration
 

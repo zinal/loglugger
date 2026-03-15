@@ -68,25 +68,47 @@ LIMIT 1;
 	return expectedPosition, found, nil
 }
 
-func (s *YDBPositionStore) Set(ctx context.Context, clientID, position string) error {
+func (s *YDBPositionStore) Set(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
 	err := s.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
 		_, _, err := session.Execute(
 			ctx,
 			table.SerializableReadWriteTxControl(table.CommitTx()),
 			fmt.Sprintf(`
 DECLARE $client_id AS Utf8;
-DECLARE $expected_position AS Utf8;
+DECLARE $old_expected_position AS Utf8;
+DECLARE $new_expected_position AS Utf8;
+
+$current_position = COALESCE((
+    SELECT expected_position
+    FROM %s
+    WHERE client_id = $client_id
+    LIMIT 1
+), "");
+
+SELECT Ensure(
+    $current_position == $old_expected_position,
+    "position mismatch"
+);
+
 UPSERT INTO %s (client_id, expected_position)
-VALUES ($client_id, $expected_position);
-`, quoteYDBPath(s.table)),
+VALUES ($client_id, $new_expected_position);
+`, quoteYDBPath(s.table), quoteYDBPath(s.table)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
-				Param("$expected_position").Text(position).
+				Param("$old_expected_position").Text(expectedPosition).
+				Param("$new_expected_position").Text(nextPosition).
 				Build(),
 		)
 		return err
 	})
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "position mismatch") {
+			current, found, getErr := s.Get(ctx, clientID)
+			if getErr != nil {
+				return fmt.Errorf("store expected position in %s: %w", s.table, err)
+			}
+			return &PositionMismatchError{CurrentPosition: current, Found: found}
+		}
 		return fmt.Errorf("store expected position in %s: %w", s.table, err)
 	}
 	return nil
@@ -97,5 +119,5 @@ func (s *YDBPositionStore) Close(ctx context.Context) error {
 }
 
 func quoteYDBPath(path string) string {
-	return "`" + strings.ReplaceAll(path, "`", "``") + "`"
+	return "`" + strings.ReplaceAll(path, "`", "_") + "`"
 }
