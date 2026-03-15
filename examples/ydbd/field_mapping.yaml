@@ -1,17 +1,18 @@
 field_mapping:
-  # Always present identity/timestamps (position-friendly and good PK candidates)
+  # Always present identity and uniqueness fields.
   - source: client_id
     destination: client_id
-  - source: realtime_timestamp
-    destination: ts_epoch_us
-    transform: int64
-  - source: monotonic_timestamp
-    destination: monotonic_ts
+  - source: log_timestamp_us
+    destination: log_timestamp_us
+    transform: timestamp64_us
+  - source: message_cityhash64
+    destination: message_hash
     transform: uint64
 
   # Parsed fields from message regex groups.
   - source: parsed.P_DTTM
     destination: ts_orig
+    transform: timestamp64
   - source: parsed.P_SERVICE
     destination: service
     default: unknown

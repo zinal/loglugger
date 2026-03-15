@@ -29,13 +29,13 @@
       "destination": "systemd_unit"
     },
     {
-      "source": "realtime_timestamp",
-      "destination": "realtime_ts_us",
-      "transform": "int64"
+      "source": "log_timestamp_us",
+      "destination": "log_timestamp_us",
+      "transform": "timestamp64_us"
     },
     {
-      "source": "monotonic_timestamp",
-      "destination": "monotonic_ts",
+      "source": "message_cityhash64",
+      "destination": "message_hash",
       "transform": "uint64"
     },
     {

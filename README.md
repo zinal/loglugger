@@ -59,6 +59,10 @@ Useful client flags:
 
 - `examples/mappings/basic.yaml` is a readable starter mapping for local mock or YDB-backed runs.
 - `examples/mappings/ydb.json` is the same idea in JSON and is convenient when wiring the YDB writer.
+- Mapper supports computed sources:
+  - `log_timestamp_us`: microsecond record timestamp that maps to YDB `Timestamp64` via `transform: timestamp64_us`.
+  - `message_cityhash64`: `CityHash64` over full record payload, typically mapped to `message_hash` (`Uint64`) for uniqueness.
+- YDB-oriented example mapping/table are in `examples/ydbd/field_mapping.yaml` and `examples/ydbd/target_table.sql`.
 
 ### Local mTLS Setup
 
@@ -158,3 +162,13 @@ Example YDB run:
 # field_mapping_file: examples/mappings/ydb.json
 ./bin/server -config examples/config/server.yaml
 ```
+
+YDB schema/mapping notes:
+
+- In `examples/ydbd/target_table.sql`, `log_timestamp_us` and `ts_orig` use `Timestamp64`.
+- In `examples/ydbd/field_mapping.yaml`, use:
+  - `transform: timestamp64_us` for microsecond epoch values (e.g., `log_timestamp_us`)
+  - `transform: timestamp64` for parsed datetime strings (e.g., `parsed.P_DTTM` -> `ts_orig`)
+- `convert_time_to_local_tz` (server config, default `false`) changes how timezone-less `timestamp64` values are parsed:
+  - `false`: interpret as UTC
+  - `true`: interpret in OS local timezone before saving (useful but dangerous when timezone config is inconsistent across hosts)

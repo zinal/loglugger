@@ -3,6 +3,9 @@ writer_backend: "ydb"
 position_store: "ydb"
 position_table: "loglugger_positions"
 field_mapping_file: "examples/ydbd/field_mapping.yaml"
+# Parse timezone-less timestamps using OS local timezone before saving.
+# Useful for local-time log formats, but dangerous if hosts/timezones are inconsistent.
+# convert_time_to_local_tz: true
 
 # YDB destination settings.
 ydb_endpoint: "grpcs://localhost:2135"

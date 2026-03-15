@@ -30,6 +30,7 @@ type serverConfig struct {
 	PositionStoreBackend string   `json:"position_store" yaml:"position_store"`
 	PositionTable        string   `json:"position_table" yaml:"position_table"`
 	FieldMappingFile     string   `json:"field_mapping_file" yaml:"field_mapping_file"`
+	ConvertTimeToLocalTZ bool     `json:"convert_time_to_local_tz" yaml:"convert_time_to_local_tz"`
 	TLSCertFile          string   `json:"tls_cert_file" yaml:"tls_cert_file"`
 	TLSKeyFile           string   `json:"tls_key_file" yaml:"tls_key_file"`
 	TLSCAFile            string   `json:"tls_ca_file" yaml:"tls_ca_file"`
@@ -76,7 +77,9 @@ func main() {
 		}()
 	}
 
-	mapper := server.NewMapper(mappings)
+	mapper := server.NewMapperWithOptions(mappings, server.MapperOptions{
+		ConvertTimeToLocalTZ: cfg.ConvertTimeToLocalTZ,
+	})
 	handler := server.NewHandler(positions, mapper, writer, fullTablePath(cfg.YDBDatabase, cfg.YDBTable))
 	mux := http.NewServeMux()
 	mux.Handle("/v1/positions", handler)
@@ -169,8 +172,8 @@ func loadMappings(cfg serverConfig) ([]server.FieldMapping, error) {
 		{Source: "parsed.P_LEVEL", Destination: "log_level"},
 		{Source: "parsed.P_MESSAGE", Destination: "log_message"},
 		{Source: "syslog_identifier", Destination: "syslog_id"},
-		{Source: "realtime_timestamp", Destination: "ts_epoch_us", Transform: "int64"},
-		{Source: "monotonic_timestamp", Destination: "monotonic_ts", Transform: "uint64"},
+		{Source: "log_timestamp_us", Destination: "log_timestamp_us", Transform: "timestamp64_us"},
+		{Source: "message_cityhash64", Destination: "message_hash", Transform: "uint64"},
 		{Source: "priority", Destination: "priority", Transform: "int"},
 		{Source: "client_id", Destination: "client_id"},
 	}, nil

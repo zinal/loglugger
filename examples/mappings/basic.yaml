@@ -13,11 +13,11 @@ field_mapping:
     destination: syslog_id
   - source: systemd_unit
     destination: systemd_unit
-  - source: realtime_timestamp
-    destination: ts_epoch_us
-    transform: int64
-  - source: monotonic_timestamp
-    destination: monotonic_ts
+  - source: log_timestamp_us
+    destination: log_timestamp_us
+    transform: timestamp64_us
+  - source: message_cityhash64
+    destination: message_hash
     transform: uint64
   - source: priority
     destination: priority

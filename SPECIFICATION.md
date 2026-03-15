@@ -262,7 +262,10 @@ RETURN 200 with next_position
 
 - **Operation**: BulkUpsert.
 - **Table schema**: Defined separately; must include columns for all required log fields plus metadata (e.g., `client_id`, `received_at`).
-- **Idempotency**: BulkUpsert is naturally idempotent for the same key. Design primary key to avoid duplicates (e.g., `client_id`, `position`, or `realtime_timestamp` + `monotonic_timestamp` + `client_id`).
+- **Idempotency**: BulkUpsert is naturally idempotent for the same key. Design primary key to avoid duplicates (e.g., `client_id`, `position`, or `client_id` + `log_timestamp_us` + `message_hash`).
+- **Recommended uniqueness fields**:
+  - `log_timestamp_us`: record timestamp as `Timestamp64` (microsecond precision).
+  - `message_hash`: `Uint64` from `CityHash64` over the full record payload.
 - **Batching**: Map incoming records to table rows. Add server-side metadata (timestamp, client_id) before upsert.
 - **Write ordering**: Successful record persistence must happen before position advancement. If record persistence fails, the server must not update `expected_position`.
 - **Library**: Use `github.com/ydb-platform/ydb-go-sdk/v3` or equivalent.
@@ -279,17 +282,27 @@ The server uses a **configurable mapping** between source fields (from the clien
 - **Mapping schema**: A list of mappings, each specifying:
   - **Source**: Field path in the incoming record. May be:
     - Top-level: `message`, `priority`, `syslog_identifier`, `systemd_unit`, `realtime_timestamp`, `monotonic_timestamp`
+    - Computed by mapper: `log_timestamp_us`, `message_cityhash64`
     - Parsed: `parsed.P_DTTM`, `parsed.P_SERVICE`, `parsed.P_LEVEL`, `parsed.P_MESSAGE`
     - Nested in `fields`: `fields.CODE_FILE`, `fields.CODE_LINE`
   - **Destination**: YDB table column name.
-  - **Transform** (optional): Function to apply (e.g., parse timestamp string to int64, default value if missing).
+  - **Transform** (optional): Function to apply (e.g., parse string to `Timestamp64`, integer conversion, default value if missing).
 
 - **Example mapping**:
 
 ```yaml
 field_mapping:
+  - source: client_id
+    destination: client_id
+  - source: log_timestamp_us
+    destination: log_timestamp_us
+    transform: timestamp64_us
+  - source: message_cityhash64
+    destination: message_hash
+    transform: uint64
   - source: parsed.P_DTTM
-    destination: log_dttm
+    destination: ts_orig
+    transform: timestamp64
   - source: parsed.P_SERVICE
     destination: service_name
   - source: parsed.P_LEVEL
@@ -298,15 +311,14 @@ field_mapping:
     destination: log_message
   - source: syslog_identifier
     destination: syslog_id
-  - source: realtime_timestamp
-    destination: ts_epoch_us
-  - source: client_id
-    destination: client_id
 ```
 
 - **Resolution order**: When building a row, the server checks `parsed` first for parsed fields; if the record has `message` instead of `parsed`, the mapping for `parsed.*` yields no value (or a configured default).
 - **Missing source**: If a mapped source field is absent, the destination column may be left NULL or filled with a default (configurable per mapping).
 - **Unmapped columns**: Destination columns not in the mapping may be set from server metadata (e.g., `received_at` = now) or left NULL.
+- **Time conversion option**: Server config option `convert_time_to_local_tz` controls parsing of timezone-less values in `timestamp64` transform:
+  - `false` (default): parse timezone-less values as UTC.
+  - `true`: parse timezone-less values in OS local timezone (`time.Local`) before saving. This is useful for local-time log formats but dangerous when hosts are configured inconsistently.
 
 ### 5.6 Position Storage
 
@@ -440,6 +452,7 @@ loglugger/
 | position_table | string | loglugger_positions | YDB table used to store expected position per client |
 | **Field mapping** | | | |
 | field_mapping_file | string | — | Path to YAML/JSON file with source→destination field mappings |
+| convert_time_to_local_tz | bool | false | Parse timezone-less `timestamp64` values in OS local timezone before writing (dangerous if timezone config differs across hosts) |
 | **TLS** | | | |
 | tls_cert_file | string | — | Path to server certificate (PEM) |
 | tls_key_file | string | — | Path to server private key (PEM) |

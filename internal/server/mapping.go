@@ -1,11 +1,14 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-faster/city"
 	"github.com/ydb-platform/loglugger/internal/models"
 )
 
@@ -22,13 +25,29 @@ type Mapper interface {
 	MapRecord(clientID string, rec models.Record) (map[string]interface{}, error)
 }
 
+// MapperOptions controls additional mapping behaviors.
+type MapperOptions struct {
+	// ConvertTimeToLocalTZ converts parsed timestamp64 values to OS local timezone before saving.
+	// This is useful when source timestamps are expected in local wall-clock time, but dangerous if misconfigured.
+	ConvertTimeToLocalTZ bool
+}
+
 type mapper struct {
-	mappings []FieldMapping
+	mappings             []FieldMapping
+	convertTimeToLocalTZ bool
 }
 
 // NewMapper creates a mapper from field mappings.
 func NewMapper(mappings []FieldMapping) Mapper {
-	return &mapper{mappings: mappings}
+	return NewMapperWithOptions(mappings, MapperOptions{})
+}
+
+// NewMapperWithOptions creates a mapper from field mappings and options.
+func NewMapperWithOptions(mappings []FieldMapping, opts MapperOptions) Mapper {
+	return &mapper{
+		mappings:             mappings,
+		convertTimeToLocalTZ: opts.ConvertTimeToLocalTZ,
+	}
 }
 
 func (m *mapper) MapRecord(clientID string, rec models.Record) (map[string]interface{}, error) {
@@ -36,8 +55,17 @@ func (m *mapper) MapRecord(clientID string, rec models.Record) (map[string]inter
 	for _, fm := range m.mappings {
 		var v string
 		var ok bool
+		var err error
 		if fm.Source == "client_id" {
 			v, ok = clientID, clientID != ""
+		} else if fm.Source == "log_timestamp_us" {
+			v, ok = logTimestampMicroseconds(rec), true
+		} else if fm.Source == "message_cityhash64" {
+			v, err = messageCityHash64(rec)
+			if err != nil {
+				return nil, fmt.Errorf("map %s -> %s: %w", fm.Source, fm.Destination, err)
+			}
+			ok = true
 		} else {
 			v, ok = rec.GetField(fm.Source)
 		}
@@ -48,7 +76,7 @@ func (m *mapper) MapRecord(clientID string, rec models.Record) (map[string]inter
 		if !ok {
 			continue
 		}
-		value, err := applyTransform(v, fm.Transform)
+		value, err := applyTransform(v, fm.Transform, m.convertTimeToLocalTZ)
 		if err != nil {
 			return nil, fmt.Errorf("map %s -> %s: %w", fm.Source, fm.Destination, err)
 		}
@@ -61,7 +89,53 @@ func (m *mapper) MapRecord(clientID string, rec models.Record) (map[string]inter
 	return row, nil
 }
 
-func applyTransform(value string, transform string) (interface{}, error) {
+func logTimestampMicroseconds(rec models.Record) string {
+	if rec.RealtimeTimestamp != nil {
+		return strconv.FormatInt(*rec.RealtimeTimestamp, 10)
+	}
+	return strconv.FormatInt(time.Now().UTC().UnixMicro(), 10)
+}
+
+func messageCityHash64(rec models.Record) (string, error) {
+	data, err := fullMessageBytes(rec)
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatUint(city.CH64(data), 10), nil
+}
+
+func fullMessageBytes(rec models.Record) ([]byte, error) {
+	payload := map[string]interface{}{
+		"message":             rec.Message,
+		"syslog_identifier":   rec.SyslogIdentifier,
+		"systemd_unit":        rec.SystemdUnit,
+		"realtime_timestamp":  rec.RealtimeTimestamp,
+		"monotonic_timestamp": rec.MonotonicTimestamp,
+		"priority":            rec.Priority,
+	}
+	if len(rec.Parsed) > 0 {
+		payload["parsed"] = stableStringMap(rec.Parsed)
+	}
+	if len(rec.Fields) > 0 {
+		payload["fields"] = stableStringMap(rec.Fields)
+	}
+	return json.Marshal(payload)
+}
+
+func stableStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	keys := make([]string, 0, len(in))
+	for key := range in {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		out[key] = in[key]
+	}
+	return out
+}
+
+func applyTransform(value string, transform string, convertTimeToLocalTZ bool) (interface{}, error) {
 	switch strings.TrimSpace(transform) {
 	case "", "string":
 		return value, nil
@@ -101,7 +175,65 @@ func applyTransform(value string, transform string) (interface{}, error) {
 			return nil, err
 		}
 		return v, nil
+	case "timestamp64_us":
+		us, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		ts := time.UnixMicro(us).UTC()
+		if convertTimeToLocalTZ {
+			ts = ts.In(time.Local)
+		}
+		return ts, nil
+	case "timestamp64":
+		return parseTimestamp64(strings.TrimSpace(value), convertTimeToLocalTZ)
 	default:
 		return nil, fmt.Errorf("unsupported transform %q", transform)
 	}
+}
+
+func parseTimestamp64(value string, convertTimeToLocalTZ bool) (time.Time, error) {
+	// Numeric input is interpreted as microseconds since Unix epoch.
+	if us, err := strconv.ParseInt(value, 10, 64); err == nil {
+		ts := time.UnixMicro(us).UTC()
+		if convertTimeToLocalTZ {
+			ts = ts.In(time.Local)
+		}
+		return ts, nil
+	}
+
+	location := time.UTC
+	if convertTimeToLocalTZ {
+		location = time.Local
+	}
+
+	withZone := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02 15:04:05.999999Z07:00",
+	}
+	for _, layout := range withZone {
+		if ts, err := time.Parse(layout, value); err == nil {
+			if convertTimeToLocalTZ {
+				ts = ts.In(time.Local)
+			}
+			return ts, nil
+		}
+	}
+
+	withoutZone := []string{
+		"2006-01-02T15:04:05.999999",
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range withoutZone {
+		if ts, err := time.ParseInLocation(layout, value, location); err == nil {
+			return ts, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("cannot parse timestamp64 value %q", value)
 }

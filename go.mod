@@ -4,6 +4,7 @@ go 1.23.9
 
 require (
 	github.com/coreos/go-systemd/v22 v22.5.0
+	github.com/go-faster/city v1.0.1
 	github.com/ydb-platform/ydb-go-sdk/v3 v3.127.3
 	github.com/ydb-platform/ydb-go-yc v0.12.3
 	gopkg.in/yaml.v3 v3.0.1

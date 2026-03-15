@@ -24,6 +24,9 @@ func TestLoadFieldMappingsYAMLAndTransforms(t *testing.T) {
 field_mapping:
   - source: parsed.P_LEVEL
     destination: level
+  - source: parsed.P_DTTM
+    destination: ts_orig
+    transform: timestamp64
   - source: priority
     destination: priority
     transform: int
@@ -33,6 +36,12 @@ field_mapping:
   - source: parsed.MISSING
     destination: fallback
     default: unknown
+  - source: log_timestamp_us
+    destination: log_timestamp_us
+    transform: timestamp64_us
+  - source: message_cityhash64
+    destination: message_hash
+    transform: uint64
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -42,11 +51,13 @@ field_mapping:
 		t.Fatal(err)
 	}
 	mapper := NewMapper(mappings)
+	recordTs := int64(1710345600000000)
 	priority := 6
 	row, err := mapper.MapRecord("client-1", models.Record{
-		Parsed:   map[string]string{"P_LEVEL": "INFO"},
-		Priority: &priority,
-		Fields:   map[string]string{"CODE_LINE": "42"},
+		Parsed:            map[string]string{"P_LEVEL": "INFO", "P_DTTM": "2025-03-13T10:00:00"},
+		Priority:          &priority,
+		RealtimeTimestamp: &recordTs,
+		Fields:            map[string]string{"CODE_LINE": "42"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +73,110 @@ field_mapping:
 	}
 	if row["fallback"] != "unknown" {
 		t.Fatalf("fallback = %#v, want unknown", row["fallback"])
+	}
+	logTS, ok := row["log_timestamp_us"].(time.Time)
+	if !ok {
+		t.Fatalf("log_timestamp_us = %#v, want time.Time", row["log_timestamp_us"])
+	}
+	if got := logTS.UTC().UnixMicro(); got != recordTs {
+		t.Fatalf("log_timestamp_us UTC unix micro = %d, want %d", got, recordTs)
+	}
+	tsOrig, ok := row["ts_orig"].(time.Time)
+	if !ok {
+		t.Fatalf("ts_orig = %#v, want time.Time", row["ts_orig"])
+	}
+	if tsOrig.UTC().Format("2006-01-02T15:04:05") != "2025-03-13T10:00:00" {
+		t.Fatalf("ts_orig UTC = %s, want 2025-03-13T10:00:00", tsOrig.UTC().Format("2006-01-02T15:04:05"))
+	}
+	if _, ok := row["message_hash"].(uint64); !ok {
+		t.Fatalf("message_hash = %#v, want uint64", row["message_hash"])
+	}
+}
+
+func TestMapper_MessageHashStableForSameRecord(t *testing.T) {
+	mapper := NewMapper([]FieldMapping{
+		{Source: "message_cityhash64", Destination: "message_hash", Transform: "uint64"},
+	})
+	rec := models.Record{
+		Parsed: map[string]string{
+			"P_LEVEL": "INFO",
+			"P_DTTM":  "2025-03-13T10:00:00",
+		},
+		Fields: map[string]string{
+			"_HOSTNAME": "node-1",
+			"CODE_FILE": "main.go",
+		},
+	}
+
+	first, err := mapper.MapRecord("client-1", rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := mapper.MapRecord("client-1", rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first["message_hash"] != second["message_hash"] {
+		t.Fatalf("hash mismatch for identical records: %v != %v", first["message_hash"], second["message_hash"])
+	}
+}
+
+func TestMapper_TimestampWithoutZoneUsesLocalWhenEnabled(t *testing.T) {
+	original := time.Local
+	local := time.FixedZone("LOCAL+03", 3*60*60)
+	time.Local = local
+	t.Cleanup(func() { time.Local = original })
+
+	mapper := NewMapperWithOptions([]FieldMapping{
+		{Source: "parsed.P_DTTM", Destination: "ts_orig", Transform: "timestamp64"},
+	}, MapperOptions{ConvertTimeToLocalTZ: true})
+
+	row, err := mapper.MapRecord("client-1", models.Record{
+		Parsed: map[string]string{"P_DTTM": "2025-03-13T10:00:00"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts, ok := row["ts_orig"].(time.Time)
+	if !ok {
+		t.Fatalf("ts_orig = %#v, want time.Time", row["ts_orig"])
+	}
+	if ts.Location().String() != local.String() {
+		t.Fatalf("ts_orig location = %q, want %q", ts.Location(), local)
+	}
+	if ts.UTC().Format("2006-01-02T15:04:05") != "2025-03-13T07:00:00" {
+		t.Fatalf("ts_orig UTC = %s, want 2025-03-13T07:00:00", ts.UTC().Format("2006-01-02T15:04:05"))
+	}
+}
+
+func TestMapper_TimestampWithZoneConvertedToLocalWhenEnabled(t *testing.T) {
+	original := time.Local
+	local := time.FixedZone("LOCAL+03", 3*60*60)
+	time.Local = local
+	t.Cleanup(func() { time.Local = original })
+
+	mapper := NewMapperWithOptions([]FieldMapping{
+		{Source: "parsed.P_DTTM", Destination: "ts_orig", Transform: "timestamp64"},
+	}, MapperOptions{ConvertTimeToLocalTZ: true})
+
+	row, err := mapper.MapRecord("client-1", models.Record{
+		Parsed: map[string]string{"P_DTTM": "2025-03-13T10:00:00Z"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts, ok := row["ts_orig"].(time.Time)
+	if !ok {
+		t.Fatalf("ts_orig = %#v, want time.Time", row["ts_orig"])
+	}
+	if ts.Location().String() != local.String() {
+		t.Fatalf("ts_orig location = %q, want %q", ts.Location(), local)
+	}
+	if ts.UTC().Format("2006-01-02T15:04:05") != "2025-03-13T10:00:00" {
+		t.Fatalf("ts_orig UTC = %s, want 2025-03-13T10:00:00", ts.UTC().Format("2006-01-02T15:04:05"))
 	}
 }
 
