@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
@@ -16,17 +17,18 @@ import (
 
 // Handler handles batch submission requests.
 type Handler struct {
-	mapper                  Mapper
-	writer                  Writer
-	parser                  MessageParser
-	table                   string
-	maxCompressedBodyBytes  int64
+	mapper                   Mapper
+	writer                   Writer
+	parser                   MessageParser
+	table                    string
+	maxCompressedBodyBytes   int64
 	maxDecompressedBodyBytes int64
 }
 
 const (
 	defaultMaxCompressedBodyBytes   int64 = 8 << 20  // 8 MiB
 	defaultMaxDecompressedBodyBytes int64 = 32 << 20 // 32 MiB
+	genericStorageErrorMessage            = "internal storage error"
 )
 
 // HandlerOptions controls request bounds for batch ingestion.
@@ -154,7 +156,7 @@ func (h *Handler) handlePosition(ctx context.Context, clientID string) *models.P
 	}
 	position, ok, err := h.writer.GetPosition(ctx, clientID)
 	if err != nil {
-		return &models.PositionResponse{Status: "error", Message: err.Error()}
+		return h.positionStorageError("get_position", clientID, err)
 	}
 	if !ok {
 		return &models.PositionResponse{Status: "not_found"}
@@ -185,18 +187,18 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 				return &models.BatchResponse{Status: "error", Message: err.Error()}
 			}
 			if err := h.writer.BulkUpsert(ctx, h.table, rows); err != nil {
-				return &models.BatchResponse{Status: "error", Message: err.Error()}
+				return h.batchStorageError("bulk_upsert", req.ClientID, err)
 			}
 		}
 		if err := h.writer.SetPositionUnconditional(ctx, req.ClientID, req.NextPosition); err != nil {
-			return &models.BatchResponse{Status: "error", Message: fmt.Sprintf("store next position: %v", err)}
+			return h.batchStorageError("set_position_unconditional", req.ClientID, err)
 		}
 		return &models.BatchResponse{Status: "ok", NextPosition: req.NextPosition}
 	}
 
 	expected, ok, err := h.writer.GetPosition(ctx, req.ClientID)
 	if err != nil {
-		return &models.BatchResponse{Status: "error", Message: err.Error()}
+		return h.batchStorageError("get_position", req.ClientID, err)
 	}
 	if !ok {
 		return &models.BatchResponse{Status: "error", Message: "missing current_position or reset required"}
@@ -214,16 +216,26 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 			return &models.BatchResponse{Status: "error", Message: err.Error()}
 		}
 		if err := h.writer.BulkUpsert(ctx, h.table, rows); err != nil {
-			return &models.BatchResponse{Status: "error", Message: err.Error()}
+			return h.batchStorageError("bulk_upsert", req.ClientID, err)
 		}
 	}
 	if err := h.writer.SetPosition(ctx, req.ClientID, expected, req.NextPosition); err != nil {
 		if resp := h.positionMismatchResponse(err); resp != nil {
 			return resp
 		}
-		return &models.BatchResponse{Status: "error", Message: fmt.Sprintf("store next position: %v", err)}
+		return h.batchStorageError("set_position", req.ClientID, err)
 	}
 	return &models.BatchResponse{Status: "ok", NextPosition: req.NextPosition}
+}
+
+func (h *Handler) batchStorageError(operation, clientID string, err error) *models.BatchResponse {
+	slog.Error("storage operation failed", "operation", operation, "client_id", clientID, "table", h.table, "error", err)
+	return &models.BatchResponse{Status: "error", Message: genericStorageErrorMessage}
+}
+
+func (h *Handler) positionStorageError(operation, clientID string, err error) *models.PositionResponse {
+	slog.Error("position storage operation failed", "operation", operation, "client_id", clientID, "error", err)
+	return &models.PositionResponse{Status: "error", Message: genericStorageErrorMessage}
 }
 
 func (h *Handler) positionMismatchResponse(err error) *models.BatchResponse {

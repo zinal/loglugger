@@ -318,6 +318,9 @@ func TestHandler_PositionStoreErrorReturnsFailure(t *testing.T) {
 	if resp.Status != "error" {
 		t.Fatalf("status = %q, want error", resp.Status)
 	}
+	if resp.Message != genericStorageErrorMessage {
+		t.Fatalf("message = %q, want %q", resp.Message, genericStorageErrorMessage)
+	}
 }
 
 func TestHandler_RejectsRecordWithoutMessage(t *testing.T) {
@@ -332,6 +335,44 @@ func TestHandler_RejectsRecordWithoutMessage(t *testing.T) {
 	})
 	if resp.Status != "error" {
 		t.Fatalf("status = %q, want error", resp.Status)
+	}
+}
+
+func TestHandler_BulkUpsertErrorReturnsGenericMessage(t *testing.T) {
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), errorWriter{err: errors.New("ydb: permission denied"), positions: map[string]string{}}, "logs")
+	resp := handler.handle(context.Background(), &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "pos-1",
+		Records:      []models.Record{{Message: "hello"}},
+	})
+	if resp.Status != "error" {
+		t.Fatalf("status = %q, want error", resp.Status)
+	}
+	if resp.Message != genericStorageErrorMessage {
+		t.Fatalf("message = %q, want %q", resp.Message, genericStorageErrorMessage)
+	}
+}
+
+func TestHandler_GetPositionErrorReturnsGenericMessage(t *testing.T) {
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), positionWriterStub{getErr: errors.New("ydb: timeout")}, "logs")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/v1/positions?client_id=client-1", nil)
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	var resp models.PositionResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != "error" {
+		t.Fatalf("status = %q, want error", resp.Status)
+	}
+	if resp.Message != genericStorageErrorMessage {
+		t.Fatalf("message = %q, want %q", resp.Message, genericStorageErrorMessage)
 	}
 }
 
@@ -571,10 +612,10 @@ func (w errorWriter) SetPositionUnconditional(ctx context.Context, clientID, nex
 }
 
 type positionWriterStub struct {
-	getPos string
-	getOK  bool
-	getErr error
-	setErr error
+	getPos   string
+	getOK    bool
+	getErr   error
+	setErr   error
 	resetErr error
 }
 
