@@ -422,12 +422,11 @@ loglugger/
 | retry_base_delay | duration | 1s | Base delay for exponential backoff |
 | **TLS** | | | |
 | tls_ca_file | string | — | Path to PEM file with CA certs for server verification |
-| tls_ca_path | string | — | Path to directory with PEM CA certs (alternative to `tls_ca_file`) |
 | tls_cert_file | string | — | Path to client certificate (PEM) for mTLS |
 | tls_key_file | string | — | Path to client private key (PEM) for mTLS |
-| tls_use_system_pool | bool | false | If true, add system CA pool to trust store (in addition to `tls_ca_*`) |
+| tls_use_system_pool | bool | false | If true, add system CA pool to trust store (in addition to `tls_ca_file`) |
 
-**TLS trust store**: Either `tls_ca_file` or `tls_ca_path` must be set (or `tls_use_system_pool` true) for server verification. For mTLS, both `tls_cert_file` and `tls_key_file` are required.
+**TLS trust store**: `tls_ca_file` must be set (or `tls_use_system_pool` must be true) for server verification. For mTLS, both `tls_cert_file` and `tls_key_file` are required.
 
 ### 8.2 Server
 
@@ -455,7 +454,6 @@ loglugger/
 | tls_cert_file | string | — | Path to server certificate (PEM) |
 | tls_key_file | string | — | Path to server private key (PEM) |
 | tls_ca_file | string | — | Path to PEM file with CA certs for client verification |
-| tls_ca_path | string | — | Path to directory with PEM CA certs (alternative to `tls_ca_file`) |
 | tls_client_subject_cn | string/list | — | Required CN value(s) in client certificate subject |
 | tls_client_subject_o | string/list | — | Required O value(s) in client certificate subject |
 | tls_client_subject_ou | string/list | — | Required OU value(s) in client certificate subject |
@@ -466,7 +464,7 @@ loglugger/
 - `mock` -> in-memory position store
 - `ydb` -> YDB position store using `position_table`
 
-**TLS**: `tls_cert_file` and `tls_key_file` are required for HTTPS. For mTLS, `tls_ca_file` or `tls_ca_path` is required. Subject checks (`tls_client_subject_*`) are optional; if any are set, all configured attributes must match.
+**TLS**: `tls_cert_file` and `tls_key_file` are required for HTTPS. For mTLS, `tls_ca_file` is required. Subject checks (`tls_client_subject_*`) are optional; if any are set, all configured attributes must match.
 
 ---
 
@@ -479,9 +477,7 @@ The client and server communicate over TLS with mutual certificate authenticatio
 The client **must** verify that the server's certificate is trusted before sending any data.
 
 - **Trust store**: The client uses a configurable trust store to validate the server certificate chain. The trust store contains the CA certificates (or intermediate CAs) that signed the server certificate.
-- **Configurable location**: The trust store path is a configuration parameter. Supported formats:
-  - **PEM file**: Path to a file containing one or more PEM-encoded CA certificates.
-  - **Directory**: Path to a directory containing PEM files (e.g., hashed certificate names per OpenSSL conventions). The client loads all certificates from the directory.
+- **Configurable location**: The trust store path is a configuration parameter and points to a PEM file containing one or more CA certificates.
 - **Default**: If not configured, the client MAY fall back to the system default trust store (e.g., `crypto/x509.SystemCertPool()`), but this should be explicitly documented and preferably disabled in production for stricter control.
 - **Implementation**: Configure `tls.Config.RootCAs` with a `x509.CertPool` populated from the configured trust store. Do not use `InsecureSkipVerify`.
 
@@ -489,7 +485,7 @@ The client **must** verify that the server's certificate is trusted before sendi
 
 The server **must** verify that the client's certificate is trusted and that it contains the required subject field values.
 
-- **Trust store**: The server uses a configurable trust store (CA certificates) to validate the client certificate chain. Format: same as client (PEM file or directory).
+- **Trust store**: The server uses a configurable trust store (CA certificates) in PEM file format to validate the client certificate chain.
 - **Client auth mode**: The server requires and verifies client certificates (`tls.RequireAndVerifyClientCert`). Connections without a valid client certificate are rejected.
 - **Subject field validation**: In addition to chain verification, the server checks that the client certificate's **Subject** contains specific required values. The required subject attributes are configurable. Typical attributes:
   - `CN` (Common Name): e.g., client hostname or identifier.
@@ -515,7 +511,7 @@ If multiple values are provided (list), the certificate subject value must match
 
 ### 9.4 Golang Implementation Notes
 
-- **Client**: Use `x509.SystemCertPool()` as base (optional) or create new `x509.CertPool()`, then append certs from file via `AppendCertsFromPEM()` or from directory by reading and parsing each PEM file.
+- **Client**: Use `x509.SystemCertPool()` as base (optional) or create new `x509.CertPool()`, then append certs from file via `AppendCertsFromPEM()`.
 - **Server**: Use `tls.Config.ClientCAs` for the trust pool and `ClientAuth: tls.RequireAndVerifyClientCert`. For subject validation, implement a custom `tls.Config.VerifyConnection` callback (Go 1.15+) or a `GetConfigForClient` hook that inspects `ConnectionState.PeerCertificates[0].Subject` after the handshake. Note: `VerifyConnection` runs during the handshake; for subject checks, ensure the peer certificate is already verified by the default chain verification before applying custom logic.
 - **Certificate parsing**: Use `x509.ParseCertificate()` for raw certs; access `cert.Subject` (type `pkix.Name`) for `CommonName`, `Organization`, `OrganizationalUnit`, etc.
 

@@ -36,7 +36,6 @@ type serverConfig struct {
 	TLSCertFile          string   `json:"tls_cert_file" yaml:"tls_cert_file"`
 	TLSKeyFile           string   `json:"tls_key_file" yaml:"tls_key_file"`
 	TLSCAFile            string   `json:"tls_ca_file" yaml:"tls_ca_file"`
-	TLSCAPath            string   `json:"tls_ca_path" yaml:"tls_ca_path"`
 	TLSClientSubjectCN   []string `json:"tls_client_subject_cn" yaml:"tls_client_subject_cn"`
 	TLSClientSubjectO    []string `json:"tls_client_subject_o" yaml:"tls_client_subject_o"`
 	TLSClientSubjectOU   []string `json:"tls_client_subject_ou" yaml:"tls_client_subject_ou"`
@@ -84,7 +83,6 @@ func main() {
 		CertFile:  cfg.TLSCertFile,
 		KeyFile:   cfg.TLSKeyFile,
 		CAFile:    cfg.TLSCAFile,
-		CAPath:    cfg.TLSCAPath,
 		AllowedCN: cfg.TLSClientSubjectCN,
 		AllowedO:  cfg.TLSClientSubjectO,
 		AllowedOU: cfg.TLSClientSubjectOU,

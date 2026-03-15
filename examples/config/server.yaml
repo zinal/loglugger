@@ -12,7 +12,6 @@ field_mapping_file: "examples/mappings/basic.yaml"
 tls_cert_file: "certs/server.crt"
 tls_key_file: "certs/server.key"
 tls_ca_file: "certs/ca.crt"
-# tls_ca_path: "certs/ca"
 
 # Optional client certificate subject restrictions.
 # Supports literal values and regex: entries prefixed with "regex:".

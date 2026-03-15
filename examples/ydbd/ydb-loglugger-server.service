@@ -7,11 +7,10 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-EnvironmentFile=-/etc/default/ydb-loglugger-server
 ExecStart=/opt/ydb/loglugger/bin/loglugger-server \
-  -config ${LOGLUGGER_SERVER_CONFIG}
+  -config /opt/ydb/loglugger/config/loglugger-server.yaml
 Restart=always
-RestartSec=2s
+RestartSec=5s
 LimitNOFILE=65536
 
 [Install]

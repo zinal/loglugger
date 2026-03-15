@@ -50,7 +50,7 @@ Useful client flags:
 - `-service-mask 'nginx*.service'` uses glob matching.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
 - `-server https://a:27312,https://b:27312` configures multiple endpoints; client uses sticky endpoint selection and switches to the next endpoint only after transient failure (`5xx` or network error).
-- `-tls-ca-path` and `-tls-use-system-pool` control the client trust store.
+- `-tls-ca-file` and `-tls-use-system-pool` control the client trust store.
 - Client batches are additionally limited to 10 MB of uncompressed log data per request.
 - If a single record exceeds 10 MB, it is sent as a single-record request (not dropped).
 

@@ -20,7 +20,7 @@ ExecStart=/opt/ydb/loglugger/bin/loglugger-client \
   -tls-cert-file ${LOGLUGGER_TLS_CERT_FILE} \
   -tls-key-file ${LOGLUGGER_TLS_KEY_FILE}
 Restart=always
-RestartSec=2s
+RestartSec=5s
 LimitNOFILE=65536
 
 [Install]

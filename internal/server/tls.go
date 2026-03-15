@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -14,7 +13,6 @@ type ServerTLSOptions struct {
 	CertFile  string
 	KeyFile   string
 	CAFile    string
-	CAPath    string
 	AllowedCN []string
 	AllowedO  []string
 	AllowedOU []string
@@ -25,15 +23,15 @@ func LoadServerTLSConfig(opts ServerTLSOptions) (*tls.Config, error) {
 	if opts.CertFile == "" || opts.KeyFile == "" {
 		return nil, fmt.Errorf("tls server certificate and key are required")
 	}
-	if opts.CAFile == "" && opts.CAPath == "" {
-		return nil, fmt.Errorf("client CA file or path is required for mTLS")
+	if opts.CAFile == "" {
+		return nil, fmt.Errorf("client CA file is required for mTLS")
 	}
 
 	cert, err := tls.LoadX509KeyPair(opts.CertFile, opts.KeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("load server certificate: %w", err)
 	}
-	clientPool, err := loadServerCertPool(opts.CAFile, opts.CAPath)
+	clientPool, err := loadServerCertPool(opts.CAFile)
 	if err != nil {
 		return nil, err
 	}
@@ -65,32 +63,14 @@ func LoadServerTLSConfig(opts ServerTLSOptions) (*tls.Config, error) {
 	return cfg, nil
 }
 
-func loadServerCertPool(caFile, caPath string) (*x509.CertPool, error) {
+func loadServerCertPool(caFile string) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
-	if caFile != "" {
-		pem, err := os.ReadFile(caFile)
-		if err != nil {
-			return nil, fmt.Errorf("read client CA file: %w", err)
-		}
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("no certificates found in %s", caFile)
-		}
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("read client CA file: %w", err)
 	}
-	if caPath != "" {
-		entries, err := os.ReadDir(caPath)
-		if err != nil {
-			return nil, fmt.Errorf("read client CA path: %w", err)
-		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			pem, err := os.ReadFile(filepath.Join(caPath, entry.Name()))
-			if err != nil {
-				continue
-			}
-			pool.AppendCertsFromPEM(pem)
-		}
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("no certificates found in %s", caFile)
 	}
 	return pool, nil
 }

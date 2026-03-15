@@ -28,7 +28,6 @@ type clientConfig struct {
 	HTTPTimeout      time.Duration
 	RetryDelay       time.Duration
 	TLSCAFile        string
-	TLSCAPath        string
 	TLSCertFile      string
 	TLSKeyFile       string
 	TLSUseSystemPool bool
@@ -136,7 +135,6 @@ func parseClientConfig() clientConfig {
 	flag.DurationVar(&cfg.HTTPTimeout, "http-timeout", 30*time.Second, "HTTP timeout")
 	flag.DurationVar(&cfg.RetryDelay, "retry-delay", time.Second, "Base retry delay")
 	flag.StringVar(&cfg.TLSCAFile, "tls-ca-file", "", "CA cert file for server verification")
-	flag.StringVar(&cfg.TLSCAPath, "tls-ca-path", "", "CA cert directory for server verification")
 	flag.StringVar(&cfg.TLSCertFile, "tls-cert-file", "", "Client cert for mTLS")
 	flag.StringVar(&cfg.TLSKeyFile, "tls-key-file", "", "Client key for mTLS")
 	flag.BoolVar(&cfg.TLSUseSystemPool, "tls-use-system-pool", false, "Use system CA pool")
@@ -161,7 +159,7 @@ func buildClientTLSConfig(cfg clientConfig) (*tls.Config, error) {
 			return nil, fmt.Errorf("server URL must include host name: %q", raw)
 		}
 	}
-	tlsCfg, err := client.LoadClientTLSConfig(cfg.TLSCAFile, cfg.TLSCAPath, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSUseSystemPool)
+	tlsCfg, err := client.LoadClientTLSConfig(cfg.TLSCAFile, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSUseSystemPool)
 	if err != nil {
 		return nil, err
 	}
