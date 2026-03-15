@@ -77,7 +77,7 @@ func (r *journalReader) Next(ctx context.Context) (*JournalEntry, error) {
 		}
 		rec := journalEntryToRecord(entry)
 		if !r.serviceMatcher.Match(rec.SystemdUnit) {
-			r.last = entry.Cursor
+			// Keep continuity relative to last sent record only.
 			continue
 		}
 		positionBefore := r.last

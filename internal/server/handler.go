@@ -204,6 +204,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 		return &models.BatchResponse{Status: "error", Message: "missing current_position or reset required"}
 	}
 	if req.CurrentPosition != expected {
+		slog.Info("position mismatch", "client_id", req.ClientID, "provided_current_position", req.CurrentPosition, "expected_position", expected)
 		return &models.BatchResponse{
 			Status:           "position_mismatch",
 			ExpectedPosition: expected,
@@ -220,7 +221,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 		}
 	}
 	if err := h.writer.SetPosition(ctx, req.ClientID, expected, req.NextPosition); err != nil {
-		if resp := h.positionMismatchResponse(err); resp != nil {
+		if resp := h.positionMismatchResponse(req.ClientID, err); resp != nil {
 			return resp
 		}
 		return h.batchStorageError("set_position", req.ClientID, err)
@@ -238,13 +239,14 @@ func (h *Handler) positionStorageError(operation, clientID string, err error) *m
 	return &models.PositionResponse{Status: "error", Message: genericStorageErrorMessage}
 }
 
-func (h *Handler) positionMismatchResponse(err error) *models.BatchResponse {
+func (h *Handler) positionMismatchResponse(clientID string, err error) *models.BatchResponse {
 	var mismatch *PositionMismatchError
 	if errors.As(err, &mismatch) {
 		expected := ""
 		if mismatch.Found {
 			expected = mismatch.CurrentPosition
 		}
+		slog.Info("position mismatch", "client_id", clientID, "expected_position", expected, "position_found", mismatch.Found)
 		return &models.BatchResponse{
 			Status:           "position_mismatch",
 			ExpectedPosition: expected,
