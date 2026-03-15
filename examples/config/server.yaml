@@ -1,6 +1,5 @@
 listen_addr: ":27312"
 writer_backend: "mock"
-position_store: "memory"
 position_table: "loglugger_positions"
 field_mapping_file: "examples/mappings/basic.yaml"
 # Parse timezone-less timestamps using OS local timezone before saving.
@@ -21,7 +20,7 @@ tls_ca_file: "certs/ca.crt"
 # tls_client_subject_ou:
 #   - "local"
 
-# Enable YDB writer/position store by switching writer_backend/position_store to "ydb"
+# Enable YDB writer (and YDB-backed position store) by switching writer_backend to "ydb"
 # and setting the values below.
 # ydb_endpoint: "grpcs://localhost:2135"
 # ydb_database: "/local"

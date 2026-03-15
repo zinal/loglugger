@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ydb-platform/loglugger/internal/buildinfo"
 	"github.com/ydb-platform/loglugger/internal/server"
 	"gopkg.in/yaml.v3"
 )
@@ -27,7 +28,6 @@ type serverConfig struct {
 	YDBAuthSACredentials string   `json:"ydb_auth_sa_key_file" yaml:"ydb_auth_sa_key_file"`
 	YDBAuthMetadataURL   string   `json:"ydb_auth_metadata_url" yaml:"ydb_auth_metadata_url"`
 	YDBCAPath            string   `json:"ydb_ca_path" yaml:"ydb_ca_path"`
-	PositionStoreBackend string   `json:"position_store" yaml:"position_store"`
 	PositionTable        string   `json:"position_table" yaml:"position_table"`
 	FieldMappingFile     string   `json:"field_mapping_file" yaml:"field_mapping_file"`
 	ConvertTimeToLocalTZ bool     `json:"convert_time_to_local_tz" yaml:"convert_time_to_local_tz"`
@@ -105,7 +105,7 @@ func main() {
 		TLSConfig: tlsConfig,
 	}
 
-	slog.Info("starting server", "addr", cfg.ListenAddr, "writer", cfg.WriterBackend, "position_store", cfg.PositionStoreBackend)
+	slog.Info("starting server", "version", buildinfo.Version, "addr", cfg.ListenAddr, "writer", cfg.WriterBackend)
 	if err := srv.ListenAndServeTLS("", ""); err != nil {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
@@ -133,12 +133,11 @@ func parseServerConfig() (serverConfig, error) {
 
 func defaultServerConfig() serverConfig {
 	return serverConfig{
-		ListenAddr:           ":27312",
-		WriterBackend:        "mock",
-		YDBTable:             "logs",
-		YDBAuthMode:          "anonymous",
-		PositionStoreBackend: "memory",
-		PositionTable:        "loglugger_positions",
+		ListenAddr:    ":27312",
+		WriterBackend: "mock",
+		YDBTable:      "logs",
+		YDBAuthMode:   "anonymous",
+		PositionTable: "loglugger_positions",
 	}
 }
 
@@ -180,8 +179,8 @@ func loadMappings(cfg serverConfig) ([]server.FieldMapping, error) {
 }
 
 func newPositionStore(cfg serverConfig) (server.PositionStore, error) {
-	switch cfg.PositionStoreBackend {
-	case "memory":
+	switch cfg.WriterBackend {
+	case "mock":
 		return server.NewMemoryPositionStore(), nil
 	case "ydb":
 		return server.NewYDBPositionStore(
@@ -192,7 +191,7 @@ func newPositionStore(cfg serverConfig) (server.PositionStore, error) {
 			ydbAuthConfig(cfg),
 		)
 	default:
-		return nil, fmt.Errorf("unsupported position store backend %q", cfg.PositionStoreBackend)
+		return nil, fmt.Errorf("unsupported writer backend %q", cfg.WriterBackend)
 	}
 }
 

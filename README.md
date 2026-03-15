@@ -127,7 +127,7 @@ Includes unit tests for parser, batcher, models, handler, and a functional test 
 
 ## YDB Integration
 
-The server supports `writer_backend: ydb` and uses `github.com/ydb-platform/ydb-go-sdk/v3` for `BulkUpsert`. Supply `ydb_endpoint`, `ydb_database`, and `ydb_table` in the config when enabling the YDB backend. The position store can also use YDB via `position_store: ydb` and `position_table`. `MockWriter` remains available for tests and local dry runs.
+The server supports `writer_backend: ydb` and uses `github.com/ydb-platform/ydb-go-sdk/v3` for `BulkUpsert`. Supply `ydb_endpoint`, `ydb_database`, and `ydb_table` in the config when enabling the YDB backend. Position storage backend is selected automatically by `writer_backend` (`mock` -> in-memory positions, `ydb` -> YDB positions via `position_table`). `MockWriter` remains available for tests and local dry runs.
 
 Supported YDB auth modes:
 
@@ -140,7 +140,7 @@ Optional YDB TLS CA certificate path:
 
 - `ydb_ca_path` points to a PEM file with CA certificates used to validate YDB TLS.
 
-Create the YDB table for the position store before starting the server with `position_store: ydb`:
+Create the YDB table for the position store before starting the server with `writer_backend: ydb`:
 
 ```sql
 CREATE TABLE `loglugger_positions` (
@@ -155,7 +155,6 @@ Example YDB run:
 ```bash
 # copy examples/config/server.yaml and set:
 # writer_backend: ydb
-# position_store: ydb
 # ydb_endpoint: grpcs://localhost:2135
 # ydb_database: /local
 # ydb_table: logs

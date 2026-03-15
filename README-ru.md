@@ -127,7 +127,7 @@ go test ./...
 
 ## Интеграция с YDB
 
-Сервер поддерживает `writer_backend: ydb` и использует `github.com/ydb-platform/ydb-go-sdk/v3` для `BulkUpsert`. При включении YDB-бэкенда укажите в конфиге `ydb_endpoint`, `ydb_database` и `ydb_table`. Хранилище позиций также может использовать YDB через `position_store: ydb` и `position_table`. `MockWriter` остается доступным для тестов и локальных прогонов.
+Сервер поддерживает `writer_backend: ydb` и использует `github.com/ydb-platform/ydb-go-sdk/v3` для `BulkUpsert`. При включении YDB-бэкенда укажите в конфиге `ydb_endpoint`, `ydb_database` и `ydb_table`. Бэкенд хранилища позиций выбирается автоматически по `writer_backend` (`mock` -> in-memory позиции, `ydb` -> YDB через `position_table`). `MockWriter` остается доступным для тестов и локальных прогонов.
 
 Поддерживаемые режимы аутентификации YDB:
 
@@ -140,7 +140,7 @@ go test ./...
 
 - `ydb_ca_path` — путь к PEM-файлу с CA-сертификатами для проверки TLS-соединения с YDB.
 
-Создайте таблицу YDB для хранилища позиций перед запуском сервера с `position_store: ydb`:
+Создайте таблицу YDB для хранилища позиций перед запуском сервера с `writer_backend: ydb`:
 
 ```sql
 CREATE TABLE `loglugger_positions` (
@@ -155,7 +155,6 @@ CREATE TABLE `loglugger_positions` (
 ```bash
 # скопируйте examples/config/server.yaml и задайте:
 # writer_backend: ydb
-# position_store: ydb
 # ydb_endpoint: grpcs://localhost:2135
 # ydb_database: /local
 # ydb_table: logs

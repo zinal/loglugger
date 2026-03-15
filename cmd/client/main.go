@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ydb-platform/loglugger/internal/buildinfo"
 	"github.com/ydb-platform/loglugger/internal/client"
 	"github.com/ydb-platform/loglugger/internal/models"
 )
@@ -42,6 +43,7 @@ func main() {
 		hostname, _ := os.Hostname()
 		cfg.ClientID = hostname
 	}
+	slog.Info("starting client", "version", buildinfo.Version, "client_id", cfg.ClientID, "servers", strings.Join(cfg.ServerURLs, ","))
 
 	tlsConfig, err := buildClientTLSConfig(cfg)
 	if err != nil {

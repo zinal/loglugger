@@ -16,3 +16,10 @@ CREATE TABLE `ydblogs` (
 ) WITH (
   STORE = COLUMN
 );
+
+-- Table for position tracking.
+CREATE TABLE `loglugger_positions` (
+  client_id Utf8 NOT NULL,
+  expected_position Utf8 NOT NULL,
+  PRIMARY KEY (client_id)
+);

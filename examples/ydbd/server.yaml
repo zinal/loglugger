@@ -1,6 +1,5 @@
 listen_addr: ":27312"
 writer_backend: "ydb"
-position_store: "ydb"
 position_table: "loglugger_positions"
 field_mapping_file: "examples/ydbd/field_mapping.yaml"
 # Parse timezone-less timestamps using OS local timezone before saving.

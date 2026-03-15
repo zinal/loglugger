@@ -448,7 +448,6 @@ loglugger/
 | ydb_auth_sa_key_file | string | — | Path to service account key file for `service-account-key` auth mode |
 | ydb_auth_metadata_url | string | — | Optional metadata endpoint URL override for `metadata` auth mode |
 | ydb_ca_path | string | — | Optional path to PEM file with CA certificates for YDB TLS verification |
-| position_store | string | memory | Backend for position storage (`ydb`, `memory`) |
 | position_table | string | loglugger_positions | YDB table used to store expected position per client |
 | **Field mapping** | | | |
 | field_mapping_file | string | — | Path to YAML/JSON file with source→destination field mappings |
@@ -463,6 +462,10 @@ loglugger/
 | tls_client_subject_ou | string/list | — | Required OU value(s) in client certificate subject |
 
 **Server startup**: Most server settings are read from `config_file` (`-config` CLI flag). `listen_addr` may be overridden with `-listen` for quick local overrides.
+
+**Backend coupling**: `writer_backend` also selects the position-store backend:
+- `mock` -> in-memory position store
+- `ydb` -> YDB position store using `position_table`
 
 **TLS**: `tls_cert_file` and `tls_key_file` are required for HTTPS. For mTLS, `tls_ca_file` or `tls_ca_path` is required. Subject checks (`tls_client_subject_*`) are optional; if any are set, all configured attributes must match.
 
