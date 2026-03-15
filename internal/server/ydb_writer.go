@@ -15,7 +15,8 @@ import (
 
 // YDBWriter writes rows to a YDB table via BulkUpsert.
 type YDBWriter struct {
-	driver *ydb.Driver
+	driver        *ydb.Driver
+	positionTable string
 }
 
 type YDBAuthOptions struct {
@@ -28,12 +29,19 @@ type YDBAuthOptions struct {
 }
 
 // NewYDBWriter connects to YDB.
-func NewYDBWriter(ctx context.Context, endpoint, database string, auth YDBAuthOptions) (*YDBWriter, error) {
+func NewYDBWriter(ctx context.Context, endpoint, database, positionTable string, auth YDBAuthOptions) (*YDBWriter, error) {
 	driver, err := openYDBDriver(ctx, endpoint, database, auth)
 	if err != nil {
 		return nil, err
 	}
-	return &YDBWriter{driver: driver}, nil
+	if strings.TrimSpace(positionTable) == "" {
+		_ = driver.Close(ctx)
+		return nil, fmt.Errorf("position table is required")
+	}
+	return &YDBWriter{
+		driver:        driver,
+		positionTable: positionTable,
+	}, nil
 }
 
 func (w *YDBWriter) BulkUpsert(ctx context.Context, tableName string, rows []map[string]interface{}) error {
@@ -68,6 +76,89 @@ func (w *YDBWriter) BulkUpsert(ctx context.Context, tableName string, rows []map
 
 func (w *YDBWriter) Close(ctx context.Context) error {
 	return w.driver.Close(ctx)
+}
+
+func (w *YDBWriter) GetPosition(ctx context.Context, clientID string) (string, bool, error) {
+	var expectedPosition string
+	var found bool
+	err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
+		_, result, err := session.Execute(
+			ctx,
+			table.SerializableReadWriteTxControl(table.CommitTx()),
+			fmt.Sprintf(`
+DECLARE $client_id AS Utf8;
+SELECT expected_position
+FROM %s
+WHERE client_id = $client_id
+LIMIT 1;
+`, quoteYDBPath(w.positionTable)),
+			ydb.ParamsBuilder().
+				Param("$client_id").Text(clientID).
+				Build(),
+		)
+		if err != nil {
+			return err
+		}
+		defer result.Close()
+
+		if result.NextResultSet(ctx, "expected_position") && result.NextRow() {
+			if err := result.Scan(&expectedPosition); err != nil {
+				return err
+			}
+			found = true
+		}
+		return result.Err()
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("get expected position from %s: %w", w.positionTable, err)
+	}
+	return expectedPosition, found, nil
+}
+
+func (w *YDBWriter) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
+	err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
+		_, _, err := session.Execute(
+			ctx,
+			table.SerializableReadWriteTxControl(table.CommitTx()),
+			fmt.Sprintf(`
+DECLARE $client_id AS Utf8;
+DECLARE $old_expected_position AS Utf8;
+DECLARE $new_expected_position AS Utf8;
+
+$current_position = COALESCE((
+    SELECT expected_position
+    FROM %s
+    WHERE client_id = $client_id
+    LIMIT 1
+), "");
+
+SELECT Ensure(
+    $current_position == $old_expected_position,
+    "position mismatch"
+);
+
+UPSERT INTO %s (client_id, expected_position)
+VALUES ($client_id, $new_expected_position);
+`, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable)),
+			ydb.ParamsBuilder().
+				Param("$client_id").Text(clientID).
+				Param("$old_expected_position").Text(expectedPosition).
+				Param("$new_expected_position").Text(nextPosition).
+				Build(),
+		)
+		return err
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "position mismatch") {
+			current, found, getErr := w.GetPosition(ctx, clientID)
+			if getErr != nil {
+				return fmt.Errorf("store expected position in %s: %w", w.positionTable, err)
+			}
+			return &PositionMismatchError{CurrentPosition: current, Found: found}
+		}
+		return fmt.Errorf("store expected position in %s: %w", w.positionTable, err)
+	}
+	return nil
 }
 
 type ydbRowBatch struct {
@@ -190,4 +281,8 @@ func ydbAuthOption(auth YDBAuthOptions) (ydb.Option, error) {
 	default:
 		return nil, fmt.Errorf("unsupported ydb auth mode %q", auth.Mode)
 	}
+}
+
+func quoteYDBPath(path string) string {
+	return "`" + strings.ReplaceAll(path, "`", "_") + "`"
 }

@@ -17,13 +17,12 @@ import (
 )
 
 func TestHandler_ResetBatch(t *testing.T) {
-	positions := NewMemoryPositionStore()
 	mapper := NewMapper([]FieldMapping{
 		{Source: "message", Destination: "msg"},
 		{Source: "client_id", Destination: "client_id"},
 	})
 	writer := NewMockWriter()
-	handler := NewHandler(positions, mapper, writer, "logs")
+	handler := NewHandler(mapper, writer, "logs")
 
 	req := &models.BatchRequest{
 		ClientID:     "test-client",
@@ -63,12 +62,10 @@ func TestHandler_ResetBatch(t *testing.T) {
 
 func TestHandler_PositionMismatch(t *testing.T) {
 	ctx := context.Background()
-	positions := NewMemoryPositionStore()
-	_ = positions.Set(ctx, "client-1", "", "expected-pos")
-
 	mapper := NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}})
 	writer := NewMockWriter()
-	handler := NewHandler(positions, mapper, writer, "logs")
+	_ = writer.SetPosition(ctx, "client-1", "", "expected-pos")
+	handler := NewHandler(mapper, writer, "logs")
 
 	req := &models.BatchRequest{
 		ClientID:        "client-1",
@@ -104,13 +101,12 @@ func TestHandler_PositionMismatch(t *testing.T) {
 
 func TestHandler_SequentialBatches(t *testing.T) {
 	ctx := context.Background()
-	positions := NewMemoryPositionStore()
 	mapper := NewMapper([]FieldMapping{
 		{Source: "message", Destination: "msg"},
 		{Source: "client_id", Destination: "client_id"},
 	})
 	writer := NewMockWriter()
-	handler := NewHandler(positions, mapper, writer, "logs")
+	handler := NewHandler(mapper, writer, "logs")
 
 	// First batch with reset
 	sendBatch := func(req *models.BatchRequest) *models.BatchResponse {
@@ -144,7 +140,7 @@ func TestHandler_SequentialBatches(t *testing.T) {
 	if len(writer.Rows) != 2 {
 		t.Errorf("rows = %d, want 2", len(writer.Rows))
 	}
-	exp, _, _ := positions.Get(ctx, "c1")
+	exp, _, _ := writer.GetPosition(ctx, "c1")
 	if exp != "pos-2" {
 		t.Errorf("stored position = %q, want pos-2", exp)
 	}
@@ -163,7 +159,7 @@ func TestHandler_FieldMappingParsed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewHandlerWithParser(NewMemoryPositionStore(), mapper, writer, "logs", parser)
+	handler := NewHandlerWithParser(mapper, writer, "logs", parser)
 
 	req := &models.BatchRequest{
 		ClientID: "host-01", Reset: true, NextPosition: "p1",
@@ -203,9 +199,9 @@ func TestHandler_FieldMappingParsed(t *testing.T) {
 
 func TestHandler_GetPositionFound(t *testing.T) {
 	ctx := context.Background()
-	positions := NewMemoryPositionStore()
-	_ = positions.Set(ctx, "client-1", "", "cursor-9")
-	handler := NewHandler(positions, NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	writer := NewMockWriter()
+	_ = writer.SetPosition(ctx, "client-1", "", "cursor-9")
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), writer, "logs")
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/v1/positions?client_id=client-1", nil)
@@ -224,7 +220,7 @@ func TestHandler_GetPositionFound(t *testing.T) {
 }
 
 func TestHandler_GetPositionNotFound(t *testing.T) {
-	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/v1/positions?client_id=missing", nil)
@@ -243,7 +239,7 @@ func TestHandler_GetPositionNotFound(t *testing.T) {
 }
 
 func TestHandler_ContentTypeWithCharset(t *testing.T) {
-	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
 	req := &models.BatchRequest{
 		ClientID:     "client-1",
 		Reset:        true,
@@ -264,9 +260,8 @@ func TestHandler_ContentTypeWithCharset(t *testing.T) {
 
 func TestHandler_WriteFailureDoesNotAdvancePosition(t *testing.T) {
 	ctx := context.Background()
-	positions := NewMemoryPositionStore()
-	_ = positions.Set(ctx, "client-1", "", "pos-1")
-	handler := NewHandler(positions, NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), errorWriter{err: errors.New("boom")}, "logs")
+	writer := &errorWriter{positions: map[string]string{"client-1": "pos-1"}, err: errors.New("boom")}
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), writer, "logs")
 
 	resp := handler.handle(ctx, &models.BatchRequest{
 		ClientID:        "client-1",
@@ -278,14 +273,14 @@ func TestHandler_WriteFailureDoesNotAdvancePosition(t *testing.T) {
 	if resp.Status != "error" {
 		t.Fatalf("status = %q, want error", resp.Status)
 	}
-	stored, _, _ := positions.Get(ctx, "client-1")
+	stored, _, _ := writer.GetPosition(ctx, "client-1")
 	if stored != "pos-1" {
 		t.Fatalf("stored position = %q, want pos-1", stored)
 	}
 }
 
 func TestHandler_PositionStoreErrorReturnsFailure(t *testing.T) {
-	handler := NewHandler(positionStoreStub{setErr: errors.New("store failed")}, NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), positionWriterStub{setErr: errors.New("store failed")}, "logs")
 
 	resp := handler.handle(context.Background(), &models.BatchRequest{
 		ClientID:     "client-1",
@@ -300,7 +295,7 @@ func TestHandler_PositionStoreErrorReturnsFailure(t *testing.T) {
 }
 
 func TestHandler_RejectsRecordWithoutMessage(t *testing.T) {
-	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
 	resp := handler.handle(context.Background(), &models.BatchRequest{
 		ClientID:     "client-1",
 		Reset:        true,
@@ -315,7 +310,7 @@ func TestHandler_RejectsRecordWithoutMessage(t *testing.T) {
 }
 
 func TestHandler_AcceptsGzipEncodedBatch(t *testing.T) {
-	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
 	req := &models.BatchRequest{
 		ClientID:     "client-1",
 		Reset:        true,
@@ -337,7 +332,7 @@ func TestHandler_AcceptsGzipEncodedBatch(t *testing.T) {
 }
 
 func TestHandler_RejectsUnsupportedContentEncoding(t *testing.T) {
-	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
 	req := &models.BatchRequest{
 		ClientID:     "client-1",
 		Reset:        true,
@@ -358,13 +353,12 @@ func TestHandler_RejectsUnsupportedContentEncoding(t *testing.T) {
 }
 
 func TestHandler_ConcurrentDifferentClients(t *testing.T) {
-	positions := NewMemoryPositionStore()
 	mapper := NewMapper([]FieldMapping{
 		{Source: "message", Destination: "msg"},
 		{Source: "client_id", Destination: "client_id"},
 	})
 	writer := NewMockWriter()
-	handler := NewHandler(positions, mapper, writer, "logs")
+	handler := NewHandler(mapper, writer, "logs")
 
 	const workers = 32
 	const totalRequests = 200
@@ -432,23 +426,44 @@ func gzipData(t *testing.T, in []byte) []byte {
 	return out
 }
 
-type errorWriter struct{ err error }
+type errorWriter struct {
+	err       error
+	positions map[string]string
+}
 
 func (w errorWriter) BulkUpsert(ctx context.Context, table string, rows []map[string]interface{}) error {
 	return w.err
 }
 
-type positionStoreStub struct {
+func (w errorWriter) GetPosition(ctx context.Context, clientID string) (string, bool, error) {
+	position, ok := w.positions[clientID]
+	return position, ok, nil
+}
+
+func (w errorWriter) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
+	current, ok := w.positions[clientID]
+	if current != expectedPosition {
+		return &PositionMismatchError{CurrentPosition: current, Found: ok}
+	}
+	w.positions[clientID] = nextPosition
+	return nil
+}
+
+type positionWriterStub struct {
 	getPos string
 	getOK  bool
 	getErr error
 	setErr error
 }
 
-func (s positionStoreStub) Get(ctx context.Context, clientID string) (string, bool, error) {
+func (s positionWriterStub) BulkUpsert(ctx context.Context, table string, rows []map[string]interface{}) error {
+	return nil
+}
+
+func (s positionWriterStub) GetPosition(ctx context.Context, clientID string) (string, bool, error) {
 	return s.getPos, s.getOK, s.getErr
 }
 
-func (s positionStoreStub) Set(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
+func (s positionWriterStub) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
 	return s.setErr
 }

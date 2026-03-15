@@ -54,18 +54,6 @@ func main() {
 		slog.Error("load field mappings", "error", err)
 		os.Exit(1)
 	}
-	positions, err := newPositionStore(cfg)
-	if err != nil {
-		slog.Error("create position store", "error", err)
-		os.Exit(1)
-	}
-	if closer, ok := positions.(interface{ Close(context.Context) error }); ok {
-		defer func() {
-			if err := closer.Close(context.Background()); err != nil {
-				slog.Warn("close position store", "error", err)
-			}
-		}()
-	}
 	writer, err := newWriter(cfg)
 	if err != nil {
 		slog.Error("create writer", "error", err)
@@ -87,7 +75,7 @@ func main() {
 		slog.Error("create server parser", "error", err)
 		os.Exit(1)
 	}
-	handler := server.NewHandlerWithParser(positions, mapper, writer, fullTablePath(cfg.YDBDatabase, cfg.YDBTable), parser)
+	handler := server.NewHandlerWithParser(mapper, writer, fullTablePath(cfg.YDBDatabase, cfg.YDBTable), parser)
 	mux := http.NewServeMux()
 	mux.Handle("/v1/positions", handler)
 	mux.Handle("/v1/batches", handler)
@@ -174,7 +162,7 @@ func loadMappings(cfg serverConfig) ([]server.FieldMapping, error) {
 	}
 	return []server.FieldMapping{
 		{Source: "message", Destination: "message"},
-		{Source: "parsed.P_DTTM", Destination: "log_dttm"},
+		{Source: "parsed.P_DTTM", Destination: "log_dttm", Transform: "timestamp64"},
 		{Source: "parsed.P_SERVICE", Destination: "service_name"},
 		{Source: "parsed.P_LEVEL", Destination: "log_level"},
 		{Source: "parsed.P_MESSAGE", Destination: "log_message"},
@@ -186,29 +174,18 @@ func loadMappings(cfg serverConfig) ([]server.FieldMapping, error) {
 	}, nil
 }
 
-func newPositionStore(cfg serverConfig) (server.PositionStore, error) {
+func newWriter(cfg serverConfig) (server.Writer, error) {
 	switch cfg.WriterBackend {
 	case "mock":
-		return server.NewMemoryPositionStore(), nil
+		return server.NewMockWriter(), nil
 	case "ydb":
-		return server.NewYDBPositionStore(
+		return server.NewYDBWriter(
 			context.Background(),
 			cfg.YDBEndpoint,
 			cfg.YDBDatabase,
 			fullTablePath(cfg.YDBDatabase, cfg.PositionTable),
 			ydbAuthConfig(cfg),
 		)
-	default:
-		return nil, fmt.Errorf("unsupported writer backend %q", cfg.WriterBackend)
-	}
-}
-
-func newWriter(cfg serverConfig) (server.Writer, error) {
-	switch cfg.WriterBackend {
-	case "mock":
-		return server.NewMockWriter(), nil
-	case "ydb":
-		return server.NewYDBWriter(context.Background(), cfg.YDBEndpoint, cfg.YDBDatabase, ydbAuthConfig(cfg))
 	default:
 		return nil, fmt.Errorf("unsupported writer backend %q", cfg.WriterBackend)
 	}

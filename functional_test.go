@@ -15,7 +15,6 @@ import (
 // TestFunctional_ClientServerFlow tests the full batch submission flow:
 // client sends batch -> server validates position -> server writes to store.
 func TestFunctional_ClientServerFlow(t *testing.T) {
-	positions := server.NewMemoryPositionStore()
 	mapper := server.NewMapper([]server.FieldMapping{
 		{Source: "message", Destination: "message"},
 		{Source: "parsed.P_DTTM", Destination: "log_dttm"},
@@ -29,7 +28,7 @@ func TestFunctional_ClientServerFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := server.NewHandlerWithParser(positions, mapper, writer, "logs", parser)
+	handler := server.NewHandlerWithParser(mapper, writer, "logs", parser)
 
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
@@ -120,7 +119,7 @@ func TestFunctional_ClientServerFlow(t *testing.T) {
 		t.Errorf("writer rows = %d, want 3", len(writer.Rows))
 	}
 	ctx := context.Background()
-	pos, ok, _ := positions.Get(ctx, "test-client-1")
+	pos, ok, _ := writer.GetPosition(ctx, "test-client-1")
 	if !ok || pos != "cursor-002" {
 		t.Errorf("stored position = %q (ok=%v), want cursor-002", pos, ok)
 	}

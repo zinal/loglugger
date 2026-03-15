@@ -16,7 +16,6 @@ import (
 
 // Handler handles batch submission requests.
 type Handler struct {
-	positions PositionStore
 	mapper    Mapper
 	writer    Writer
 	parser    MessageParser
@@ -24,14 +23,13 @@ type Handler struct {
 }
 
 // NewHandler creates a batch handler.
-func NewHandler(positions PositionStore, mapper Mapper, writer Writer, table string) *Handler {
-	return NewHandlerWithParser(positions, mapper, writer, table, nil)
+func NewHandler(mapper Mapper, writer Writer, table string) *Handler {
+	return NewHandlerWithParser(mapper, writer, table, nil)
 }
 
 // NewHandlerWithParser creates a batch handler with optional server-side message parser.
-func NewHandlerWithParser(positions PositionStore, mapper Mapper, writer Writer, table string, parser MessageParser) *Handler {
+func NewHandlerWithParser(mapper Mapper, writer Writer, table string, parser MessageParser) *Handler {
 	return &Handler{
-		positions: positions,
 		mapper:    mapper,
 		writer:    writer,
 		parser:    parser,
@@ -97,7 +95,7 @@ func (h *Handler) handlePosition(ctx context.Context, clientID string) *models.P
 	if clientID == "" {
 		return &models.PositionResponse{Status: "error", Message: "client_id is required"}
 	}
-	position, ok, err := h.positions.Get(ctx, clientID)
+	position, ok, err := h.writer.GetPosition(ctx, clientID)
 	if err != nil {
 		return &models.PositionResponse{Status: "error", Message: err.Error()}
 	}
@@ -121,7 +119,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 	}
 
 	if req.Reset {
-		expected, ok, err := h.positions.Get(ctx, req.ClientID)
+		expected, ok, err := h.writer.GetPosition(ctx, req.ClientID)
 		if err != nil {
 			return &models.BatchResponse{Status: "error", Message: err.Error()}
 		}
@@ -137,7 +135,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 				return &models.BatchResponse{Status: "error", Message: err.Error()}
 			}
 		}
-		if err := h.positions.Set(ctx, req.ClientID, expected, req.NextPosition); err != nil {
+		if err := h.writer.SetPosition(ctx, req.ClientID, expected, req.NextPosition); err != nil {
 			if resp := h.positionMismatchResponse(err); resp != nil {
 				return resp
 			}
@@ -146,7 +144,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 		return &models.BatchResponse{Status: "ok", NextPosition: req.NextPosition}
 	}
 
-	expected, ok, err := h.positions.Get(ctx, req.ClientID)
+	expected, ok, err := h.writer.GetPosition(ctx, req.ClientID)
 	if err != nil {
 		return &models.BatchResponse{Status: "error", Message: err.Error()}
 	}
@@ -169,7 +167,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 			return &models.BatchResponse{Status: "error", Message: err.Error()}
 		}
 	}
-	if err := h.positions.Set(ctx, req.ClientID, expected, req.NextPosition); err != nil {
+	if err := h.writer.SetPosition(ctx, req.ClientID, expected, req.NextPosition); err != nil {
 		if resp := h.positionMismatchResponse(err); resp != nil {
 			return resp
 		}
