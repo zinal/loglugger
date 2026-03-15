@@ -105,6 +105,7 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 		}
 
 		endpoint, endpointIdx := s.currentEndpoint()
+		slog.Debug("send attempt", "attempt", attempt+1, "endpoint", endpoint.baseURL)
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.batchesURL, bytes.NewReader(compressedBody))
 		if err != nil {
 			return nil, err
@@ -129,13 +130,16 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 
 		switch resp.StatusCode {
 		case http.StatusOK:
+			s.markSuccess(endpointIdx)
 			return &batchResp, nil
 		case http.StatusConflict:
+			s.markSuccess(endpointIdx)
 			return &batchResp, nil
 		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
 			return &batchResp, ErrClientError{Message: batchResp.Message}
 		default:
 			if resp.StatusCode >= 500 {
+				slog.Debug("send got retriable HTTP status", "attempt", attempt+1, "endpoint", endpoint.baseURL, "status_code", resp.StatusCode, "message", batchResp.Message)
 				s.advanceStartIndexOnFailure(endpointIdx)
 				continue
 			}
@@ -167,6 +171,7 @@ func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse,
 		}
 
 		endpoint, endpointIdx := s.currentEndpoint()
+		slog.Debug("fetch position attempt", "attempt", attempt+1, "endpoint", endpoint.baseURL)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.positionURL+"?client_id="+url.QueryEscape(s.clientID), nil)
 		if err != nil {
 			return nil, err
@@ -191,11 +196,13 @@ func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse,
 
 		switch resp.StatusCode {
 		case http.StatusOK:
+			s.markSuccess(endpointIdx)
 			return &positionResp, nil
 		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
 			return &positionResp, ErrClientError{Message: positionResp.Message}
 		default:
 			if resp.StatusCode >= 500 {
+				slog.Debug("fetch position got retriable HTTP status", "attempt", attempt+1, "endpoint", endpoint.baseURL, "status_code", resp.StatusCode, "message", positionResp.Message)
 				s.advanceStartIndexOnFailure(endpointIdx)
 				continue
 			}
@@ -245,6 +252,15 @@ func (s *sender) advanceStartIndexOnFailure(failedIndex int) {
 	}
 	next := uint64((failedIndex + 1) % len(s.endpoints))
 	atomic.StoreUint64(&s.nextIndex, next)
+}
+
+func (s *sender) markSuccess(successIndex int) {
+	// Re-prefer the first configured endpoint after any successful call.
+	// This allows automatic failback once the primary endpoint recovers.
+	if successIndex == 0 {
+		return
+	}
+	atomic.StoreUint64(&s.nextIndex, 0)
 }
 
 // ErrClientError indicates a client error (4xx) that should not be retried.
