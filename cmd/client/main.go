@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ type clientConfig struct {
 	ServerURLs       []string
 	ClientID         string
 	ServiceMask      string
+	Debug            bool
 	BatchSize        int
 	BatchTimeout     time.Duration
 	HTTPTimeout      time.Duration
@@ -35,12 +37,13 @@ type clientConfig struct {
 
 func main() {
 	cfg := parseClientConfig()
+	setupClientLogger(cfg.Debug)
 
 	if cfg.ClientID == "" {
 		hostname, _ := os.Hostname()
 		cfg.ClientID = hostname
 	}
-	slog.Info("starting client", "version", buildinfo.Version, "client_id", cfg.ClientID, "servers", strings.Join(cfg.ServerURLs, ","))
+	slog.Info("starting client", "version", buildinfo.Version, "client_id", cfg.ClientID, "servers", strings.Join(cfg.ServerURLs, ","), "debug", cfg.Debug)
 
 	tlsConfig, err := buildClientTLSConfig(cfg)
 	if err != nil {
@@ -91,6 +94,7 @@ func main() {
 
 	flushTicker := time.NewTicker(cfg.BatchTimeout)
 	defer flushTicker.Stop()
+	emptyReads := 0
 
 	for {
 		select {
@@ -99,6 +103,7 @@ func main() {
 			return
 		case <-flushTicker.C:
 			if batch := batcher.Flush(); batch != nil {
+				slog.Debug("flush by timeout", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
 				reset = sendBatch(ctx, journal, sender, batch, reset)
 			}
 		default:
@@ -111,14 +116,24 @@ func main() {
 			continue
 		}
 		if entry == nil {
+			emptyReads++
+			if emptyReads == 1 || emptyReads%100 == 0 {
+				slog.Debug("journal has no new entries", "empty_reads", emptyReads)
+			}
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
+		if emptyReads > 0 {
+			slog.Debug("journal resumed with new entries", "empty_reads", emptyReads)
+			emptyReads = 0
+		}
 
 		batcher.Add(entry)
+		slog.Debug("journal entry received", "systemd_unit", entry.Record.SystemdUnit, "cursor", entry.Cursor, "position", entry.Position)
 
 		if batcher.ShouldFlush() {
 			if batch := batcher.Flush(); batch != nil {
+				slog.Debug("flush by batch limit", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
 				reset = sendBatch(ctx, journal, sender, batch, reset)
 			}
 		}
@@ -138,9 +153,34 @@ func parseClientConfig() clientConfig {
 	flag.StringVar(&cfg.TLSCertFile, "tls-cert-file", "", "Client cert for mTLS")
 	flag.StringVar(&cfg.TLSKeyFile, "tls-key-file", "", "Client key for mTLS")
 	flag.BoolVar(&cfg.TLSUseSystemPool, "tls-use-system-pool", false, "Use system CA pool")
+	flag.BoolVar(&cfg.Debug, "debug", parseEnvBool("LOGLUGGER_DEBUG", false), "Enable debug logging (or set LOGLUGGER_DEBUG=true)")
 	flag.Parse()
 	cfg.ServerURLs = parseServerURLs(*serverList)
 	return cfg
+}
+
+func setupClientLogger(debug bool) {
+	level := slog.LevelInfo
+	if debug {
+		level = slog.LevelDebug
+	}
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: level,
+	})
+	slog.SetDefault(slog.New(handler))
+}
+
+func parseEnvBool(name string, defaultValue bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		slog.Warn("invalid boolean env value, using default", "name", name, "value", raw, "default", defaultValue)
+		return defaultValue
+	}
+	return value
 }
 
 func buildClientTLSConfig(cfg clientConfig) (*tls.Config, error) {
@@ -188,6 +228,7 @@ func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bo
 		return "", false, fmt.Errorf("position lookup returned empty response")
 	}
 	if resp.Status == "not_found" {
+		slog.Debug("startup position not found; client reset required")
 		return "", true, nil
 	}
 	if resp.Status != "ok" {
@@ -199,10 +240,12 @@ func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bo
 	if resp.CurrentPosition == "" {
 		return "", false, fmt.Errorf("position lookup returned empty current_position")
 	}
+	slog.Debug("startup position fetched", "current_position", resp.CurrentPosition)
 	return resp.CurrentPosition, false, nil
 }
 
 func sendBatch(ctx context.Context, journal client.JournalReader, sender client.Sender, batch *client.Batch, reset bool) bool {
+	slog.Debug("sending batch", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
 	req := &models.BatchRequest{
 		Reset:           reset,
 		CurrentPosition: batch.CurrentPosition,
@@ -218,6 +261,7 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 		slog.Error("send batch", "error", err)
 		return reset
 	}
+	slog.Debug("batch response received", "status", resp.Status, "expected_position", resp.ExpectedPosition, "message", resp.Message)
 	if resp.Status == "position_mismatch" {
 		slog.Info("position mismatch", "expected", resp.ExpectedPosition)
 		if resp.ExpectedPosition != "" {
