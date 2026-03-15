@@ -3,12 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
 	yc "github.com/ydb-platform/ydb-go-yc"
 )
@@ -17,6 +18,12 @@ import (
 type YDBWriter struct {
 	driver        *ydb.Driver
 	positionTable string
+	schemaMu      sync.RWMutex
+	tableSchemas  map[string]tableSchema
+}
+
+type tableSchema struct {
+	columns []options.Column
 }
 
 type YDBAuthOptions struct {
@@ -41,6 +48,7 @@ func NewYDBWriter(ctx context.Context, endpoint, database, positionTable string,
 	return &YDBWriter{
 		driver:        driver,
 		positionTable: positionTable,
+		tableSchemas:  make(map[string]tableSchema),
 	}, nil
 }
 
@@ -48,28 +56,24 @@ func (w *YDBWriter) BulkUpsert(ctx context.Context, tableName string, rows []map
 	if len(rows) == 0 {
 		return nil
 	}
-	grouped, err := groupRowsBySchema(rows)
+	schema, err := w.getTableSchema(ctx, tableName)
 	if err != nil {
 		return err
 	}
-	for _, batch := range grouped {
-		if err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
-			values := make([]types.Value, 0, len(batch.rows))
-			for _, row := range batch.rows {
-				structFields := make([]types.StructValueOption, 0, len(batch.columns))
-				for _, column := range batch.columns {
-					value, err := encodeYDBValue(row[column])
-					if err != nil {
-						return fmt.Errorf("encode %s: %w", column, err)
-					}
-					structFields = append(structFields, types.StructFieldValue(column, value))
-				}
-				values = append(values, types.StructValue(structFields...))
-			}
-			return session.BulkUpsert(ctx, tableName, types.ListValue(values...))
-		}); err != nil {
-			return fmt.Errorf("bulk upsert rows into %s: %w", tableName, err)
+	values := make([]types.Value, 0, len(rows))
+	for _, row := range rows {
+		structFields, err := structFieldsForRow(row, schema.columns)
+		if err != nil {
+			return err
 		}
+		values = append(values, types.StructValue(structFields...))
+	}
+	rowsValue := types.ListValue(values...)
+
+	if err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
+		return session.BulkUpsert(ctx, tableName, rowsValue)
+	}); err != nil {
+		return fmt.Errorf("bulk upsert rows into %s: %w", tableName, err)
 	}
 	return nil
 }
@@ -186,36 +190,6 @@ VALUES ($client_id, $new_expected_position);
 	return nil
 }
 
-type ydbRowBatch struct {
-	columns []string
-	rows    []map[string]interface{}
-}
-
-func groupRowsBySchema(rows []map[string]interface{}) ([]ydbRowBatch, error) {
-	grouped := make(map[string]*ydbRowBatch)
-	order := make([]string, 0)
-	for _, row := range rows {
-		columns := make([]string, 0, len(row))
-		for column := range row {
-			columns = append(columns, column)
-		}
-		sort.Strings(columns)
-		key := strings.Join(columns, "\x00")
-		batch, ok := grouped[key]
-		if !ok {
-			batch = &ydbRowBatch{columns: columns, rows: make([]map[string]interface{}, 0)}
-			grouped[key] = batch
-			order = append(order, key)
-		}
-		batch.rows = append(batch.rows, row)
-	}
-	batches := make([]ydbRowBatch, 0, len(order))
-	for _, key := range order {
-		batches = append(batches, *grouped[key])
-	}
-	return batches, nil
-}
-
 func encodeYDBValue(value interface{}) (types.Value, error) {
 	switch v := value.(type) {
 	case string:
@@ -255,6 +229,51 @@ func encodeYDBValue(value interface{}) (types.Value, error) {
 	default:
 		return nil, fmt.Errorf("unsupported YDB value type %T", value)
 	}
+}
+
+func structFieldsForRow(row map[string]interface{}, columns []options.Column) ([]types.StructValueOption, error) {
+	structFields := make([]types.StructValueOption, 0, len(columns))
+	for _, column := range columns {
+		raw, ok := row[column.Name]
+		if !ok {
+			optional, innerType := types.IsOptional(column.Type)
+			if !optional {
+				return nil, fmt.Errorf("missing required column %q", column.Name)
+			}
+			structFields = append(structFields, types.StructFieldValue(column.Name, types.NullValue(innerType)))
+			continue
+		}
+		value, err := encodeYDBValue(raw)
+		if err != nil {
+			return nil, fmt.Errorf("encode %s: %w", column.Name, err)
+		}
+		structFields = append(structFields, types.StructFieldValue(column.Name, value))
+	}
+	return structFields, nil
+}
+
+func (w *YDBWriter) getTableSchema(ctx context.Context, tableName string) (tableSchema, error) {
+	w.schemaMu.RLock()
+	cached, ok := w.tableSchemas[tableName]
+	w.schemaMu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	var desc options.Description
+	if err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
+		var err error
+		desc, err = session.DescribeTable(ctx, tableName)
+		return err
+	}); err != nil {
+		return tableSchema{}, fmt.Errorf("describe table %s: %w", tableName, err)
+	}
+	schema := tableSchema{columns: desc.Columns}
+
+	w.schemaMu.Lock()
+	w.tableSchemas[tableName] = schema
+	w.schemaMu.Unlock()
+	return schema, nil
 }
 
 func openYDBDriver(ctx context.Context, endpoint, database string, auth YDBAuthOptions) (*ydb.Driver, error) {
