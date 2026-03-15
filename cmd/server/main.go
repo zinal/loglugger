@@ -30,6 +30,8 @@ type serverConfig struct {
 	YDBCAPath            string   `json:"ydb_ca_path" yaml:"ydb_ca_path"`
 	PositionTable        string   `json:"position_table" yaml:"position_table"`
 	FieldMappingFile     string   `json:"field_mapping_file" yaml:"field_mapping_file"`
+	MessageRegex         string   `json:"message_regex" yaml:"message_regex"`
+	MessageRegexNoMatch  string   `json:"message_regex_no_match" yaml:"message_regex_no_match"`
 	ConvertTimeToLocalTZ bool     `json:"convert_time_to_local_tz" yaml:"convert_time_to_local_tz"`
 	TLSCertFile          string   `json:"tls_cert_file" yaml:"tls_cert_file"`
 	TLSKeyFile           string   `json:"tls_key_file" yaml:"tls_key_file"`
@@ -80,7 +82,12 @@ func main() {
 	mapper := server.NewMapperWithOptions(mappings, server.MapperOptions{
 		ConvertTimeToLocalTZ: cfg.ConvertTimeToLocalTZ,
 	})
-	handler := server.NewHandler(positions, mapper, writer, fullTablePath(cfg.YDBDatabase, cfg.YDBTable))
+	parser, err := server.NewMessageParser(cfg.MessageRegex, server.NoMatchAction(cfg.MessageRegexNoMatch))
+	if err != nil {
+		slog.Error("create server parser", "error", err)
+		os.Exit(1)
+	}
+	handler := server.NewHandlerWithParser(positions, mapper, writer, fullTablePath(cfg.YDBDatabase, cfg.YDBTable), parser)
 	mux := http.NewServeMux()
 	mux.Handle("/v1/positions", handler)
 	mux.Handle("/v1/batches", handler)
@@ -133,11 +140,12 @@ func parseServerConfig() (serverConfig, error) {
 
 func defaultServerConfig() serverConfig {
 	return serverConfig{
-		ListenAddr:    ":27312",
-		WriterBackend: "mock",
-		YDBTable:      "logs",
-		YDBAuthMode:   "anonymous",
-		PositionTable: "loglugger_positions",
+		ListenAddr:          ":27312",
+		WriterBackend:       "mock",
+		YDBTable:            "logs",
+		YDBAuthMode:         "anonymous",
+		PositionTable:       "loglugger_positions",
+		MessageRegexNoMatch: string(server.NoMatchSendRaw),
 	}
 }
 

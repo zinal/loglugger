@@ -18,15 +18,22 @@ type Handler struct {
 	positions PositionStore
 	mapper    Mapper
 	writer    Writer
+	parser    MessageParser
 	table     string
 }
 
 // NewHandler creates a batch handler.
 func NewHandler(positions PositionStore, mapper Mapper, writer Writer, table string) *Handler {
+	return NewHandlerWithParser(positions, mapper, writer, table, nil)
+}
+
+// NewHandlerWithParser creates a batch handler with optional server-side message parser.
+func NewHandlerWithParser(positions PositionStore, mapper Mapper, writer Writer, table string, parser MessageParser) *Handler {
 	return &Handler{
 		positions: positions,
 		mapper:    mapper,
 		writer:    writer,
+		parser:    parser,
 		table:     table,
 	}
 }
@@ -158,21 +165,22 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 }
 
 func validateRecord(rec models.Record) error {
-	hasMessage := rec.Message != ""
-	hasParsed := len(rec.Parsed) > 0
-	switch {
-	case hasMessage && hasParsed:
-		return fmt.Errorf("record must include either message or parsed, not both")
-	case !hasMessage && !hasParsed:
-		return fmt.Errorf("record must include message or parsed")
-	default:
-		return nil
+	if rec.Message == "" {
+		return fmt.Errorf("record must include message")
 	}
+	return nil
 }
 
 func (h *Handler) mapRecords(clientID string, records []models.Record) ([]map[string]interface{}, error) {
 	rows := make([]map[string]interface{}, 0, len(records))
 	for _, rec := range records {
+		if h.parser != nil {
+			parsed, ok := h.parser.Parse(rec)
+			if !ok {
+				continue
+			}
+			rec = parsed
+		}
 		row, err := h.mapper.MapRecord(clientID, rec)
 		if err != nil {
 			return nil, err

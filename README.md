@@ -50,7 +50,6 @@ Useful client flags:
 - `-service-mask 'nginx*.service'` uses glob matching.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
 - `-server https://a:27312,https://b:27312` configures multiple endpoints; client uses sticky endpoint selection and switches to the next endpoint only after transient failure (`5xx` or network error).
-- `-message-regex` and `-message-regex-no-match send_raw|skip` control MESSAGE parsing.
 - `-tls-ca-path` and `-tls-use-system-pool` control the client trust store.
 - Client batches are additionally limited to 10 MB of uncompressed log data per request.
 - If a single record exceeds 10 MB, it is sent as a single-record request (not dropped).
@@ -113,8 +112,7 @@ For a local mock-backed end-to-end run:
   -client-id myhost \
   -tls-ca-file certs/ca.crt \
   -tls-cert-file certs/client.crt \
-  -tls-key-file certs/client.key \
-  -message-regex '^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*)$'
+  -tls-key-file certs/client.key
 ```
 
 ## Tests
@@ -171,3 +169,4 @@ YDB schema/mapping notes:
 - `convert_time_to_local_tz` (server config, default `false`) changes how timezone-less `timestamp64` values are parsed:
   - `false`: interpret as UTC
   - `true`: interpret in OS local timezone before saving (useful but dangerous when timezone config is inconsistent across hosts)
+- `message_regex` and `message_regex_no_match` are server-side settings now (configured in server YAML/JSON).

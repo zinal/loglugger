@@ -2,6 +2,9 @@ listen_addr: ":27312"
 writer_backend: "mock"
 position_table: "loglugger_positions"
 field_mapping_file: "examples/mappings/basic.yaml"
+# Optional server-side MESSAGE parser.
+# message_regex: '^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*).*$'
+# message_regex_no_match: "send_raw" # send_raw|skip
 # Parse timezone-less timestamps using OS local timezone before saving.
 # Useful for local-time log formats, but dangerous if hosts/timezones are inconsistent.
 # convert_time_to_local_tz: true

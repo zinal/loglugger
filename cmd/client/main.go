@@ -23,8 +23,6 @@ type clientConfig struct {
 	ServerURLs       []string
 	ClientID         string
 	ServiceMask      string
-	MessageRegex     string
-	NoMatchAction    client.NoMatchAction
 	BatchSize        int
 	BatchTimeout     time.Duration
 	HTTPTimeout      time.Duration
@@ -48,12 +46,6 @@ func main() {
 	tlsConfig, err := buildClientTLSConfig(cfg)
 	if err != nil {
 		slog.Error("load TLS config", "error", err)
-		os.Exit(1)
-	}
-
-	parser, err := client.NewMessageParser(cfg.MessageRegex, cfg.NoMatchAction)
-	if err != nil {
-		slog.Error("create parser", "error", err)
 		os.Exit(1)
 	}
 
@@ -124,15 +116,6 @@ func main() {
 			continue
 		}
 
-		rec := entry.Record
-		if parser != nil {
-			parsed, ok := parser.Parse(rec)
-			if !ok {
-				continue
-			}
-			rec = parsed
-		}
-		entry.Record = rec
 		batcher.Add(entry)
 
 		if batcher.ShouldFlush() {
@@ -148,8 +131,6 @@ func parseClientConfig() clientConfig {
 	serverList := flag.String("server", "https://localhost:27312", "Server URL or comma-separated server URLs")
 	flag.StringVar(&cfg.ClientID, "client-id", "", "Client ID (default: hostname)")
 	flag.StringVar(&cfg.ServiceMask, "service-mask", "", "Filter for _SYSTEMD_UNIT")
-	flag.StringVar(&cfg.MessageRegex, "message-regex", "", "Regex to parse MESSAGE (named groups)")
-	noMatch := flag.String("message-regex-no-match", "send_raw", "When regex fails: send_raw or skip")
 	flag.IntVar(&cfg.BatchSize, "batch-size", 50000, "Max records per batch")
 	flag.DurationVar(&cfg.BatchTimeout, "batch-timeout", 5*time.Second, "Batch flush timeout")
 	flag.DurationVar(&cfg.HTTPTimeout, "http-timeout", 30*time.Second, "HTTP timeout")
@@ -160,7 +141,6 @@ func parseClientConfig() clientConfig {
 	flag.StringVar(&cfg.TLSKeyFile, "tls-key-file", "", "Client key for mTLS")
 	flag.BoolVar(&cfg.TLSUseSystemPool, "tls-use-system-pool", false, "Use system CA pool")
 	flag.Parse()
-	cfg.NoMatchAction = client.NoMatchAction(*noMatch)
 	cfg.ServerURLs = parseServerURLs(*serverList)
 	return cfg
 }

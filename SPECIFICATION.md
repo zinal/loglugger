@@ -53,7 +53,7 @@ The system implements a **position-tracking protocol** to ensure exactly-once de
 
 1. Read log records from systemd journald.
 2. Optionally filter records by service name using a configurable mask (e.g., glob, regex, or prefix).
-3. Optionally parse the MESSAGE field with a regex; extract named groups and send them instead of the raw message.
+3. Send raw MESSAGE field in the protocol payload.
 4. Batch records for efficient transmission.
 5. Send batches to one or more server endpoints via HTTP in JSON format.
 6. Maintain and validate position continuity with the server.
@@ -82,24 +82,15 @@ The system implements a **position-tracking protocol** to ensure exactly-once de
   - The server returned `expected_position` due to mismatch and the client cannot resume from that position (e.g., journal history was lost).
   - Configuration change that invalidates position (e.g., filter mask change).
 
-### 4.4 Message Parsing (Optional)
+### 4.4 Message Payload
 
-Before batching, the client may parse the journal `MESSAGE` field using a configurable regular expression with **named capture groups**. The parsed fields replace the raw message in the payload sent to the server.
-
-- **Regex**: Configurable pattern. Use Go's named group syntax: `(?P<Name>subexpr)`.
-- **Example**: `^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*)$` — extracts `P_DTTM`, `P_SERVICE`, `P_LEVEL`, `P_MESSAGE` from messages like `2025-03-13T10:00:00 :nginx INFO: Server started`.
-- **Output**: When the regex matches, the client sends the named groups as a `parsed` map (e.g., `{"P_DTTM": "...", "P_SERVICE": "...", "P_LEVEL": "...", "P_MESSAGE": "..."}`) instead of the original `message`. Journal metadata (priority, timestamps, etc.) is still sent.
-- **No match**: If the regex does not match, the client either:
-  - **Option A** (default): Send the record with `message` set to the raw value and `parsed` omitted or empty.
-  - **Option B** (configurable): Skip the record (do not include in batch).
-- **Compilation**: The regex is compiled once at startup. Invalid regex causes client startup failure.
-- **Golang**: Use `regexp.MustCompile()` or `regexp.Compile()`; `FindStringSubmatch()` returns slice where index 0 is full match, and `SubexpNames()` gives group names. Build the `parsed` map from `SubexpIndex(name)` for each named group.
+The client sends raw `message` to the server. Parsing is performed on the server side and is configured via server settings.
 
 ### 4.5 Batching
 
 - **Record count limit**: `batch_size` defines the maximum number of records in a normal batch.
 - **Uncompressed payload limit**: The client must not send more than **10 MB** of log data (uncompressed) in one request.
-  - Log-data size is calculated from record content fields (`message`, `parsed` values, `fields` values, and selected metadata string fields), before gzip compression.
+  - Log-data size is calculated from record content fields (`message`, `fields` values, and selected metadata string fields), before gzip compression.
   - If adding another record would exceed 10 MB, the client flushes the current batch and sends the next records in subsequent requests.
   - If a single record itself is larger than 10 MB, the client still sends it as a single-record batch (exception to the normal cap), rather than dropping it.
 - **Flush triggers**: Batch is sent when record-count limit is reached, uncompressed payload limit is reached, timeout expires, or on graceful shutdown.
@@ -127,9 +118,10 @@ Before batching, the client may parse the journal `MESSAGE` field using a config
 
 1. Accept HTTP requests with batches of log records.
 2. Validate position continuity per client.
-3. Map source fields to destination table columns using the configured field mapping.
-4. Persist batches to the configured backend (`mock` for testing, or `ydb` for the actual usage).
-5. Return appropriate responses including position information or errors.
+3. Optionally parse `message` using a server-side regex and enrich records with parsed groups.
+4. Map source fields to destination table columns using the configured field mapping.
+5. Persist batches to the configured backend (`mock` for testing, or `ydb` for the actual usage).
+6. Return appropriate responses including position information or errors.
 
 ### 5.2 HTTP API
 
@@ -183,12 +175,6 @@ Content-Type: application/json
   "records": [                     // Required. Array of log records.
     {
       "message": "string",         // Raw message; present when parsing disabled or regex did not match.
-      "parsed": {                  // Parsed fields from regex; present when regex matched. Replaces message.
-        "P_DTTM": "string",
-        "P_SERVICE": "string",
-        "P_LEVEL": "string",
-        "P_MESSAGE": "string"
-      },
       "priority": "int",
       "syslog_identifier": "string",
       "systemd_unit": "string",
@@ -200,7 +186,7 @@ Content-Type: application/json
 }
 ```
 
-**Payload rule**: Each record contains either `message` (raw) or `parsed` (extracted fields), not both. When the client's regex matches, `parsed` is sent; otherwise `message` is sent.
+**Payload rule**: Each record includes raw `message`. Parsing-related fields are not part of the client-server protocol.
 
 #### 5.2.4 Success Response (200 OK)
 
@@ -320,7 +306,18 @@ field_mapping:
   - `false` (default): parse timezone-less values as UTC.
   - `true`: parse timezone-less values in OS local timezone (`time.Local`) before saving. This is useful for local-time log formats but dangerous when hosts are configured inconsistently.
 
-### 5.6 Position Storage
+### 5.6 Server-Side Message Parsing (Optional)
+
+Before mapping, the server may parse incoming `message` using a configurable regex with named capture groups:
+
+- `message_regex`: regex pattern with named groups (e.g., `(?P<P_DTTM>...)`).
+- `message_regex_no_match`: behavior when regex does not match:
+  - `send_raw` (default): keep the record and map raw `message`.
+  - `skip`: drop the record from the batch before write.
+
+Parsed groups are available to field mapping as `parsed.<GROUP_NAME>` but are not included in the protocol payload.
+
+### 5.7 Position Storage
 
 - **Backend**: Persistent store keyed by `client_id`. In the current design, this is a dedicated YDB table or an in-memory store for tests/local development.
 - **Value**: `expected_position` string.
@@ -333,12 +330,11 @@ field_mapping:
 
 ### 6.1 Log Record (Client → Server)
 
-Each record contains either `message` (raw) or `parsed` (regex-extracted fields), depending on whether the client's message regex matched.
+Each record contains raw `message`. Parsing results are not sent over protocol.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| message | string | Conditional | Raw log message; present when parsing disabled or regex did not match |
-| parsed | map[string]string | Conditional | Named capture groups from regex; present when regex matched. Keys are group names (e.g., `P_DTTM`, `P_SERVICE`, `P_LEVEL`, `P_MESSAGE`) |
+| message | string | Yes | Raw log message from journald |
 | priority | int | No | Syslog priority (0–7) |
 | syslog_identifier | string | No | Syslog identifier |
 | systemd_unit | string | No | systemd unit name |
@@ -417,8 +413,6 @@ loglugger/
 | client_id | string | hostname | Unique client identifier |
 | service_mask | string | "" | Filter mask for `_SYSTEMD_UNIT` (empty = no filter) |
 | **Message parsing** | | | |
-| message_regex | string | "" | Regex with named groups to parse MESSAGE. Empty = no parsing, send raw message |
-| message_regex_no_match | string | send_raw | Behavior when regex does not match: `send_raw` (default) or `skip` |
 | batch_size | int | 1000 | Max records per batch (also constrained by the fixed 10 MB uncompressed log-data limit per request) |
 | batch_timeout | duration | 5s | Max time before flushing partial batch |
 | http_timeout | duration | 30s | HTTP request timeout |
@@ -451,6 +445,8 @@ loglugger/
 | position_table | string | loglugger_positions | YDB table used to store expected position per client |
 | **Field mapping** | | | |
 | field_mapping_file | string | — | Path to YAML/JSON file with source→destination field mappings |
+| message_regex | string | "" | Regex with named groups for server-side MESSAGE parsing. Empty = parsing disabled |
+| message_regex_no_match | string | send_raw | Server behavior when regex does not match: `send_raw` or `skip` |
 | convert_time_to_local_tz | bool | false | Parse timezone-less `timestamp64` values in OS local timezone before writing (dangerous if timezone config differs across hosts) |
 | **TLS** | | | |
 | tls_cert_file | string | — | Path to server certificate (PEM) |
@@ -536,7 +532,7 @@ If multiple values are provided (list), the certificate subject value must match
 
 ## 11. Appendix: Example Batch Request
 
-**With parsed fields** (regex matched):
+**Example batch request**:
 
 ```json
 {
@@ -546,43 +542,13 @@ If multiple values are provided (list), the certificate subject value must match
   "next_position": "s=12345;o=68190;",
   "records": [
     {
-      "parsed": {
-        "P_DTTM": "2025-03-13T10:00:00",
-        "P_SERVICE": "nginx",
-        "P_LEVEL": "INFO",
-        "P_MESSAGE": "Server started"
-      },
+      "message": "2025-03-13T10:00:00 :nginx INFO: Server started",
       "priority": 6,
       "syslog_identifier": "nginx",
       "systemd_unit": "nginx.service",
       "realtime_timestamp": 1710345600000000,
       "monotonic_timestamp": 12345678,
       "fields": {}
-    }
-  ]
-}
-```
-
-**With raw message** (parsing disabled or regex did not match):
-
-```json
-{
-  "client_id": "host-01-prod",
-  "reset": false,
-  "current_position": "s=12345;o=67890;",
-  "next_position": "s=12345;o=68190;",
-  "records": [
-    {
-      "message": "Server started",
-      "priority": 6,
-      "syslog_identifier": "nginx",
-      "systemd_unit": "nginx.service",
-      "realtime_timestamp": 1710345600000000,
-      "monotonic_timestamp": 12345678,
-      "fields": {
-        "CODE_FILE": "src/core/nginx.c",
-        "CODE_LINE": "1234"
-      }
     }
   ]
 }

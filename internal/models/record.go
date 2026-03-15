@@ -3,16 +3,16 @@ package models
 import "strconv"
 
 // Record represents a log record sent from client to server.
-// Each record contains either Message (raw) or Parsed (regex-extracted fields), not both.
+// Parsed fields are server-side enrichment and are not part of the wire protocol.
 type Record struct {
-	Message           string            `json:"message,omitempty"`
-	Parsed            map[string]string  `json:"parsed,omitempty"`
-	Priority          *int              `json:"priority,omitempty"`
-	SyslogIdentifier  string            `json:"syslog_identifier,omitempty"`
-	SystemdUnit       string            `json:"systemd_unit,omitempty"`
-	RealtimeTimestamp *int64            `json:"realtime_timestamp,omitempty"`
-	MonotonicTimestamp *uint64          `json:"monotonic_timestamp,omitempty"`
-	Fields            map[string]string  `json:"fields,omitempty"`
+	Message            string            `json:"message,omitempty"`
+	Parsed             map[string]string `json:"-"`
+	Priority           *int              `json:"priority,omitempty"`
+	SyslogIdentifier   string            `json:"syslog_identifier,omitempty"`
+	SystemdUnit        string            `json:"systemd_unit,omitempty"`
+	RealtimeTimestamp  *int64            `json:"realtime_timestamp,omitempty"`
+	MonotonicTimestamp *uint64           `json:"monotonic_timestamp,omitempty"`
+	Fields             map[string]string `json:"fields,omitempty"`
 }
 
 // HasParsed returns true if the record has parsed fields.

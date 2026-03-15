@@ -157,18 +157,17 @@ func TestHandler_FieldMappingParsed(t *testing.T) {
 		{Source: "client_id", Destination: "client_id"},
 	})
 	writer := NewMockWriter()
-	handler := NewHandler(NewMemoryPositionStore(), mapper, writer, "logs")
+	parser, err := NewMessageParser(`^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*)$`, NoMatchSendRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandlerWithParser(NewMemoryPositionStore(), mapper, writer, "logs", parser)
 
 	req := &models.BatchRequest{
 		ClientID: "host-01", Reset: true, NextPosition: "p1",
 		Records: []models.Record{
 			{
-				Parsed: map[string]string{
-					"P_DTTM":    "2025-03-13T10:00:00",
-					"P_SERVICE": "nginx",
-					"P_LEVEL":   "INFO",
-					"P_MESSAGE": "Server started",
-				},
+				Message: "2025-03-13T10:00:00 :nginx INFO: Server started",
 			},
 		},
 	}
@@ -298,25 +297,7 @@ func TestHandler_PositionStoreErrorReturnsFailure(t *testing.T) {
 	}
 }
 
-func TestHandler_RejectsRecordWithMessageAndParsed(t *testing.T) {
-	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
-	resp := handler.handle(context.Background(), &models.BatchRequest{
-		ClientID:     "client-1",
-		Reset:        true,
-		NextPosition: "pos-1",
-		Records: []models.Record{
-			{
-				Message: "raw",
-				Parsed:  map[string]string{"P_MESSAGE": "parsed"},
-			},
-		},
-	})
-	if resp.Status != "error" {
-		t.Fatalf("status = %q, want error", resp.Status)
-	}
-}
-
-func TestHandler_RejectsRecordWithoutMessageOrParsed(t *testing.T) {
+func TestHandler_RejectsRecordWithoutMessage(t *testing.T) {
 	handler := NewHandler(NewMemoryPositionStore(), NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
 	resp := handler.handle(context.Background(), &models.BatchRequest{
 		ClientID:     "client-1",

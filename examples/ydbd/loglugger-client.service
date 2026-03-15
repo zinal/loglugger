@@ -7,13 +7,11 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-EnvironmentFile=-/etc/default/loglugger-client
-ExecStart=/opt/loglugger/bin/client \
+EnvironmentFile=-/etc/default/ydb-loglugger-client
+ExecStart=/opt/ydb/loglugger/bin/loglugger-client \
   -server ${LOGLUGGER_SERVER_URL} \
   -client-id ${LOGLUGGER_CLIENT_ID} \
   -service-mask ${LOGLUGGER_SERVICE_MASK} \
-  -message-regex '^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*).*$' \
-  -message-regex-no-match send_raw \
   -batch-size ${LOGLUGGER_BATCH_SIZE} \
   -batch-timeout ${LOGLUGGER_BATCH_TIMEOUT} \
   -http-timeout ${LOGLUGGER_HTTP_TIMEOUT} \

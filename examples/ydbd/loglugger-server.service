@@ -1,0 +1,18 @@
+[Unit]
+Description=Loglugger server for YDBD journald logs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=-/etc/default/ydb-loglugger-server
+ExecStart=/opt/ydb/loglugger/bin/loglugger-server \
+  -config ${LOGLUGGER_SERVER_CONFIG}
+Restart=always
+RestartSec=2s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

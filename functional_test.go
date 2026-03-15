@@ -25,7 +25,11 @@ func TestFunctional_ClientServerFlow(t *testing.T) {
 		{Source: "client_id", Destination: "client_id"},
 	})
 	writer := server.NewMockWriter()
-	handler := server.NewHandler(positions, mapper, writer, "logs")
+	parser, err := server.NewMessageParser(`^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*)$`, server.NoMatchSendRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := server.NewHandlerWithParser(positions, mapper, writer, "logs", parser)
 
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
@@ -34,19 +38,12 @@ func TestFunctional_ClientServerFlow(t *testing.T) {
 
 	// 1. First batch with reset
 	req1 := &models.BatchRequest{
-		ClientID:       "test-client-1",
-		Reset:          true,
-		NextPosition:   "cursor-001",
+		ClientID:     "test-client-1",
+		Reset:        true,
+		NextPosition: "cursor-001",
 		Records: []models.Record{
 			{Message: "raw log line"},
-			{
-				Parsed: map[string]string{
-					"P_DTTM":   "2025-03-13T10:00:00",
-					"P_SERVICE": "nginx",
-					"P_LEVEL":   "INFO",
-					"P_MESSAGE": "Server started",
-				},
-			},
+			{Message: "2025-03-13T10:00:00 :nginx INFO: Server started"},
 		},
 	}
 	body1, _ := json.Marshal(req1)
@@ -72,11 +69,11 @@ func TestFunctional_ClientServerFlow(t *testing.T) {
 
 	// 2. Second batch with position continuity
 	req2 := &models.BatchRequest{
-		ClientID:       "test-client-1",
-		Reset:          false,
+		ClientID:        "test-client-1",
+		Reset:           false,
 		CurrentPosition: "cursor-001",
-		NextPosition:   "cursor-002",
-		Records: []models.Record{{Message: "second batch"}},
+		NextPosition:    "cursor-002",
+		Records:         []models.Record{{Message: "second batch"}},
 	}
 	body2, _ := json.Marshal(req2)
 	resp2, err := client.Post(srv.URL+"/v1/batches", "application/json", bytes.NewReader(body2))
@@ -91,11 +88,11 @@ func TestFunctional_ClientServerFlow(t *testing.T) {
 
 	// 3. Position mismatch - wrong current_position
 	req3 := &models.BatchRequest{
-		ClientID:       "test-client-1",
-		Reset:          false,
+		ClientID:        "test-client-1",
+		Reset:           false,
 		CurrentPosition: "wrong-cursor",
-		NextPosition:   "cursor-003",
-		Records:        []models.Record{{Message: "should reject"}},
+		NextPosition:    "cursor-003",
+		Records:         []models.Record{{Message: "should reject"}},
 	}
 	body3, _ := json.Marshal(req3)
 	resp3, err := client.Post(srv.URL+"/v1/batches", "application/json", bytes.NewReader(body3))
