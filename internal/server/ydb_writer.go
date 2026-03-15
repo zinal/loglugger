@@ -136,13 +136,12 @@ $current_position = (
     LIMIT 1
 );
 
-SELECT Ensure(
-    COALESCE($current_position, "") == $old_expected_position,
-    "position mismatch"
-);
-
 UPSERT INTO %s (client_id, expected_position)
-VALUES ($client_id, $new_expected_position);
+VALUES ($client_id, Ensure(
+    $new_expected_position,
+    COALESCE($current_position, ""u) == $old_expected_position,
+    "position mismatch"
+));
 `, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
