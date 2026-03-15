@@ -195,6 +195,25 @@ func TestParseClientConfigParsesServerList(t *testing.T) {
 	}
 }
 
+func TestParseClientConfigParsesJournalNamespace(t *testing.T) {
+	prev := flag.CommandLine
+	prevArgs := os.Args
+	defer func() {
+		flag.CommandLine = prev
+		os.Args = prevArgs
+	}()
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+
+	os.Args = []string{
+		"client",
+		"-journal-namespace", "my_namespace",
+	}
+	cfg := parseClientConfig()
+	if cfg.JournalNamespace != "my_namespace" {
+		t.Fatalf("JournalNamespace = %q, want my_namespace", cfg.JournalNamespace)
+	}
+}
+
 func TestParseClientConfigDebugTrueDoesNotBreakFollowingFlags(t *testing.T) {
 	prev := flag.CommandLine
 	prevArgs := os.Args

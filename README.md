@@ -53,6 +53,7 @@ Useful client flags:
 - `-service-mask nginx.service` uses exact systemd unit matching.
 - `-service-mask 'nginx*.service'` uses glob matching.
 - `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
+- `-journal-namespace my_namespace` reads logs from a non-default journald namespace.
 - `-debug` enables verbose client diagnostics (disabled by default); alternatively set `LOGLUGGER_DEBUG=true`.
 - `-server https://a:27312,https://b:27312` configures multiple endpoints; the client keeps using the current endpoint while requests succeed and switches to the next one only after a transient failure (`5xx` or network error).
 - `-tls-ca-file` and `-tls-use-system-pool` control the client trust store.
@@ -147,6 +148,7 @@ Supported YDB auth modes:
 Optional path to a YDB TLS CA certificate:
 
 - `ydb_ca_path` points to a PEM file with CA certificates used to validate YDB TLS.
+- `ydb_open_timeout` sets timeout for opening the YDB connection during startup (default `10s`).
 
 Create the YDB table for the position store before starting the server with `writer_backend: ydb`:
 
@@ -166,6 +168,7 @@ Example YDB run:
 # ydb_endpoint: grpcs://localhost:2135
 # ydb_database: /local
 # ydb_table: logs
+# ydb_open_timeout: 10s
 # field_mapping_file: examples/mappings/ydb.json
 ./bin/loglugger-server -config examples/config/server.yaml
 ```

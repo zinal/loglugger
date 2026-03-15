@@ -5,8 +5,10 @@ package client
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -23,7 +25,7 @@ type journalReader struct {
 
 // NewJournalReader creates a journal reader. Only available on Linux.
 func NewJournalReader(cfg JournalConfig) (JournalReader, error) {
-	j, err := sdjournal.NewJournal()
+	j, err := openJournal(cfg.JournalNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("open journal: %w", err)
 	}
@@ -39,6 +41,45 @@ func NewJournalReader(cfg JournalConfig) (JournalReader, error) {
 		}
 	}
 	return &journalReader{j: j, cfg: cfg, serviceMatcher: matcher}, nil
+}
+
+func openJournal(namespace string) (*sdjournal.Journal, error) {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return sdjournal.NewJournal()
+	}
+	if strings.ContainsRune(namespace, os.PathSeparator) {
+		return nil, fmt.Errorf("invalid journald namespace %q: must not contain path separators", namespace)
+	}
+	dir, err := findNamespaceJournalDir(namespace)
+	if err != nil {
+		return nil, err
+	}
+	return sdjournal.NewJournalFromDir(dir)
+}
+
+func findNamespaceJournalDir(namespace string) (string, error) {
+	searchRoots := []string{
+		"/var/log/journal",
+		"/run/log/journal",
+	}
+	for _, root := range searchRoots {
+		matches, err := filepath.Glob(filepath.Join(root, "*."+namespace))
+		if err != nil {
+			return "", fmt.Errorf("lookup journald namespace %q in %s: %w", namespace, root, err)
+		}
+		sort.Strings(matches)
+		for _, candidate := range matches {
+			info, err := os.Stat(candidate)
+			if err != nil {
+				continue
+			}
+			if info.IsDir() {
+				return candidate, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("journald namespace %q not found in /var/log/journal or /run/log/journal", namespace)
 }
 
 func (r *journalReader) SeekToPosition(ctx context.Context, position string) error {

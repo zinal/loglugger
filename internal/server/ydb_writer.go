@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -26,6 +27,11 @@ type tableSchema struct {
 	columns []options.Column
 }
 
+var (
+	ydbOpen                = ydb.Open
+	defaultYDBOpenTimeout = 10 * time.Second
+)
+
 type YDBAuthOptions struct {
 	Mode                  string
 	Login                 string
@@ -36,8 +42,8 @@ type YDBAuthOptions struct {
 }
 
 // NewYDBWriter connects to YDB.
-func NewYDBWriter(ctx context.Context, endpoint, database, positionTable string, auth YDBAuthOptions) (*YDBWriter, error) {
-	driver, err := openYDBDriver(ctx, endpoint, database, auth)
+func NewYDBWriter(ctx context.Context, endpoint, database, positionTable string, auth YDBAuthOptions, openTimeout time.Duration) (*YDBWriter, error) {
+	driver, err := openYDBDriver(ctx, endpoint, database, auth, openTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +284,7 @@ func (w *YDBWriter) getTableSchema(ctx context.Context, tableName string) (table
 	return schema, nil
 }
 
-func openYDBDriver(ctx context.Context, endpoint, database string, auth YDBAuthOptions) (*ydb.Driver, error) {
+func openYDBDriver(ctx context.Context, endpoint, database string, auth YDBAuthOptions, openTimeout time.Duration) (*ydb.Driver, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("ydb endpoint is required")
 	}
@@ -296,8 +302,24 @@ func openYDBDriver(ctx context.Context, endpoint, database string, auth YDBAuthO
 	if caPath := strings.TrimSpace(auth.CACertPath); caPath != "" {
 		opts = append(opts, ydb.WithCertificatesFromFile(caPath))
 	}
-	driver, err := ydb.Open(ctx, endpoint, opts...)
+	effectiveOpenTimeout := openTimeout
+	if effectiveOpenTimeout <= 0 {
+		effectiveOpenTimeout = defaultYDBOpenTimeout
+	}
+	openCtx := ctx
+	cancel := func() {}
+	appliedDefaultTimeout := false
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		openCtx, cancel = context.WithTimeout(ctx, effectiveOpenTimeout)
+		appliedDefaultTimeout = true
+	}
+	defer cancel()
+
+	driver, err := ydbOpen(openCtx, endpoint, opts...)
 	if err != nil {
+		if appliedDefaultTimeout && errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("open ydb connection timed out after %s: %w", effectiveOpenTimeout, err)
+		}
 		return nil, fmt.Errorf("open ydb connection: %w", err)
 	}
 	return driver, nil

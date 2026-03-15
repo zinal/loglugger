@@ -23,5 +23,6 @@ type JournalReader interface {
 
 // JournalConfig configures the journal reader.
 type JournalConfig struct {
-	ServiceMask string // Filter for _SYSTEMD_UNIT (empty = no filter)
+	ServiceMask      string // Filter for _SYSTEMD_UNIT (empty = no filter)
+	JournalNamespace string // journald namespace (empty = default namespace)
 }

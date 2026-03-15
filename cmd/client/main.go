@@ -24,6 +24,7 @@ type clientConfig struct {
 	ServerURLs       []string
 	ClientID         string
 	ServiceMask      string
+	JournalNamespace string
 	Debug            bool
 	BatchSize        int
 	BatchTimeout     time.Duration
@@ -51,7 +52,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	journal, err := client.NewJournalReader(client.JournalConfig{ServiceMask: cfg.ServiceMask})
+	journal, err := client.NewJournalReader(client.JournalConfig{
+		ServiceMask:      cfg.ServiceMask,
+		JournalNamespace: cfg.JournalNamespace,
+	})
 	if err != nil {
 		slog.Error("open journal", "error", err)
 		os.Exit(1)
@@ -145,6 +149,7 @@ func parseClientConfig() clientConfig {
 	serverList := flag.String("server", "https://localhost:27312", "Server URL or comma-separated server URLs")
 	flag.StringVar(&cfg.ClientID, "client-id", "", "Client ID (default: hostname)")
 	flag.StringVar(&cfg.ServiceMask, "service-mask", "", "Filter for _SYSTEMD_UNIT")
+	flag.StringVar(&cfg.JournalNamespace, "journal-namespace", "", "journald namespace to read from (empty = default)")
 	flag.IntVar(&cfg.BatchSize, "batch-size", 50000, "Max records per batch")
 	flag.DurationVar(&cfg.BatchTimeout, "batch-timeout", 5*time.Second, "Batch flush timeout")
 	flag.DurationVar(&cfg.HTTPTimeout, "http-timeout", 30*time.Second, "HTTP timeout")

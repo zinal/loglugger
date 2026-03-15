@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ydb-platform/loglugger/internal/buildinfo"
 	"github.com/ydb-platform/loglugger/internal/server"
@@ -30,6 +31,7 @@ type serverConfig struct {
 	YDBAuthSACredentials     string   `json:"ydb_auth_sa_key_file" yaml:"ydb_auth_sa_key_file"`
 	YDBAuthMetadataURL       string   `json:"ydb_auth_metadata_url" yaml:"ydb_auth_metadata_url"`
 	YDBCAPath                string   `json:"ydb_ca_path" yaml:"ydb_ca_path"`
+	YDBOpenTimeout           string   `json:"ydb_open_timeout" yaml:"ydb_open_timeout"`
 	PositionTable            string   `json:"position_table" yaml:"position_table"`
 	FieldMappingFile         string   `json:"field_mapping_file" yaml:"field_mapping_file"`
 	MessageRegex             string   `json:"message_regex" yaml:"message_regex"`
@@ -148,6 +150,7 @@ func defaultServerConfig() serverConfig {
 		MaxDecompressedBodyBytes: 32 << 20,
 		YDBTable:                 "logs",
 		YDBAuthMode:              "anonymous",
+		YDBOpenTimeout:           "10s",
 		PositionTable:            "loglugger_positions",
 		MessageRegexNoMatch:      string(server.NoMatchSendRaw),
 	}
@@ -195,12 +198,20 @@ func newWriter(cfg serverConfig) (server.Writer, error) {
 	case "mock":
 		return server.NewMockWriter(), nil
 	case "ydb":
+		openTimeout, err := time.ParseDuration(strings.TrimSpace(cfg.YDBOpenTimeout))
+		if err != nil {
+			return nil, fmt.Errorf("parse ydb_open_timeout: %w", err)
+		}
+		if openTimeout <= 0 {
+			return nil, fmt.Errorf("ydb_open_timeout must be greater than zero")
+		}
 		return server.NewYDBWriter(
 			context.Background(),
 			cfg.YDBEndpoint,
 			cfg.YDBDatabase,
 			cfg.PositionTable,
 			ydbAuthConfig(cfg),
+			openTimeout,
 		)
 	default:
 		return nil, fmt.Errorf("unsupported writer backend %q", cfg.WriterBackend)
