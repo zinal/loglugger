@@ -195,6 +195,42 @@ func TestParseClientConfigParsesServerList(t *testing.T) {
 	}
 }
 
+func TestParseClientConfigDebugTrueDoesNotBreakFollowingFlags(t *testing.T) {
+	prev := flag.CommandLine
+	prevArgs := os.Args
+	defer func() {
+		flag.CommandLine = prev
+		os.Args = prevArgs
+	}()
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+
+	os.Args = []string{
+		"client",
+		"-debug", "true",
+		"-server", "https://a:27312,https://b:27312",
+		"-batch-size", "123",
+	}
+	cfg := parseClientConfig()
+	if !cfg.Debug {
+		t.Fatal("Debug = false, want true")
+	}
+	if cfg.BatchSize != 123 {
+		t.Fatalf("BatchSize = %d, want 123", cfg.BatchSize)
+	}
+	want := []string{"https://a:27312", "https://b:27312"}
+	if !reflect.DeepEqual(cfg.ServerURLs, want) {
+		t.Fatalf("ServerURLs = %v, want %v", cfg.ServerURLs, want)
+	}
+}
+
+func TestNormalizeBoolFlagArgs(t *testing.T) {
+	got := normalizeBoolFlagArgs([]string{"-debug", "true", "-server", "https://a:27312"}, "debug")
+	want := []string{"-debug=true", "-server", "https://a:27312"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeBoolFlagArgs() = %v, want %v", got, want)
+	}
+}
+
 type stubSender struct {
 	resp         *models.BatchResponse
 	positionResp *models.PositionResponse

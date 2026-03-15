@@ -154,9 +154,33 @@ func parseClientConfig() clientConfig {
 	flag.StringVar(&cfg.TLSKeyFile, "tls-key-file", "", "Client key for mTLS")
 	flag.BoolVar(&cfg.TLSUseSystemPool, "tls-use-system-pool", false, "Use system CA pool")
 	flag.BoolVar(&cfg.Debug, "debug", parseEnvBool("LOGLUGGER_DEBUG", false), "Enable debug logging (or set LOGLUGGER_DEBUG=true)")
-	flag.Parse()
+	_ = flag.CommandLine.Parse(normalizeBoolFlagArgs(os.Args[1:], "debug"))
 	cfg.ServerURLs = parseServerURLs(*serverList)
 	return cfg
+}
+
+func normalizeBoolFlagArgs(args []string, flagName string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	shortName := "-" + flagName
+	longName := "--" + flagName
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		current := args[i]
+		if current == shortName || current == longName {
+			if i+1 < len(args) {
+				next := strings.TrimSpace(args[i+1])
+				if _, err := strconv.ParseBool(next); err == nil {
+					out = append(out, current+"="+next)
+					i++
+					continue
+				}
+			}
+		}
+		out = append(out, current)
+	}
+	return out
 }
 
 func setupClientLogger(debug bool) {
