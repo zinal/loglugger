@@ -152,6 +152,7 @@ func defaultServerConfig() serverConfig {
 		YDBAuthMode:              "anonymous",
 		YDBOpenTimeout:           "10s",
 		PositionTable:            "loglugger_positions",
+		MessageRegex:             `^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$`,
 		MessageRegexNoMatch:      string(server.NoMatchSendRaw),
 	}
 }

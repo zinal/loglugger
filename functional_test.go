@@ -24,7 +24,7 @@ func TestFunctional_ClientServerFlow(t *testing.T) {
 		{Source: "client_id", Destination: "client_id"},
 	})
 	writer := server.NewMockWriter()
-	parser, err := server.NewMessageParser(`^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*)$`, server.NoMatchSendRaw)
+	parser, err := server.NewMessageParser(`^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$`, server.NoMatchSendRaw)
 	if err != nil {
 		t.Fatal(err)
 	}

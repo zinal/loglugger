@@ -448,7 +448,7 @@ loglugger/
 | position_table | string | loglugger_positions | YDB table used to store expected position per client |
 | **Field mapping** | | | |
 | field_mapping_file | string | — | Path to YAML/JSON file with source→destination field mappings |
-| message_regex | string | "" | Regex with named groups for server-side MESSAGE parsing. Empty = parsing disabled |
+| message_regex | string | `^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$` | Regex with named groups for server-side MESSAGE parsing |
 | systemd_unit_regex | string | "" | Regex with named groups for server-side `_SYSTEMD_UNIT` parsing. Empty = parsing disabled |
 | message_regex_no_match | string | send_raw | Server behavior when regex does not match: `send_raw` or `skip` |
 | convert_time_to_local_tz | bool | false | Parse timezone-less `timestamp64` values in OS local timezone before writing (dangerous if timezone config differs across hosts) |

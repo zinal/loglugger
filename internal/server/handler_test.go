@@ -181,7 +181,7 @@ func TestHandler_FieldMappingParsed(t *testing.T) {
 		{Source: "client_id", Destination: "client_id"},
 	})
 	writer := NewMockWriter()
-	parser, err := NewMessageParser(`^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*)$`, NoMatchSendRaw)
+	parser, err := NewMessageParser(`^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$`, NoMatchSendRaw)
 	if err != nil {
 		t.Fatal(err)
 	}
