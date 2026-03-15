@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -349,6 +350,70 @@ func TestHandler_RejectsUnsupportedContentEncoding(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandler_RejectsTooLargeIdentityBody(t *testing.T) {
+	handler := NewHandlerWithOptions(
+		NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}),
+		NewMockWriter(),
+		"logs",
+		nil,
+		HandlerOptions{
+			MaxCompressedBodyBytes:   128,
+			MaxDecompressedBodyBytes: 1024,
+		},
+	)
+	req := &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "pos-1",
+		Records: []models.Record{
+			{Message: strings.Repeat("a", 2048)},
+		},
+	}
+	body, _ := json.Marshal(req)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", w.Code)
+	}
+}
+
+func TestHandler_RejectsTooLargeGzipDecodedBody(t *testing.T) {
+	handler := NewHandlerWithOptions(
+		NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}),
+		NewMockWriter(),
+		"logs",
+		nil,
+		HandlerOptions{
+			MaxCompressedBodyBytes:   1 << 20,
+			MaxDecompressedBodyBytes: 256,
+		},
+	)
+	req := &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "pos-1",
+		Records: []models.Record{
+			{Message: strings.Repeat("x", 4096)},
+		},
+	}
+	raw, _ := json.Marshal(req)
+	compressed := gzipData(t, raw)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(compressed))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Content-Encoding", "gzip")
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", w.Code)
 	}
 }
 

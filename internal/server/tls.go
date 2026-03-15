@@ -18,6 +18,11 @@ type ServerTLSOptions struct {
 	AllowedOU []string
 }
 
+type allowedMatcher struct {
+	exact  map[string]struct{}
+	regexp []*regexp.Regexp
+}
+
 // LoadServerTLSConfig builds the server TLS config with optional subject checks.
 func LoadServerTLSConfig(opts ServerTLSOptions) (*tls.Config, error) {
 	if opts.CertFile == "" || opts.KeyFile == "" {
@@ -36,6 +41,19 @@ func LoadServerTLSConfig(opts ServerTLSOptions) (*tls.Config, error) {
 		return nil, err
 	}
 
+	cnMatcher, err := compileAllowedMatcher(opts.AllowedCN)
+	if err != nil {
+		return nil, fmt.Errorf("compile allowed CN rules: %w", err)
+	}
+	oMatcher, err := compileAllowedMatcher(opts.AllowedO)
+	if err != nil {
+		return nil, fmt.Errorf("compile allowed O rules: %w", err)
+	}
+	ouMatcher, err := compileAllowedMatcher(opts.AllowedOU)
+	if err != nil {
+		return nil, fmt.Errorf("compile allowed OU rules: %w", err)
+	}
+
 	cfg := &tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{cert},
@@ -48,13 +66,13 @@ func LoadServerTLSConfig(opts ServerTLSOptions) (*tls.Config, error) {
 				return fmt.Errorf("missing client certificate")
 			}
 			subject := state.PeerCertificates[0].Subject
-			if len(opts.AllowedCN) > 0 && !matchesAllowed(subject.CommonName, opts.AllowedCN) {
+			if len(opts.AllowedCN) > 0 && !cnMatcher.Match(subject.CommonName) {
 				return fmt.Errorf("client certificate common name %q is not allowed", subject.CommonName)
 			}
-			if len(opts.AllowedO) > 0 && !containsAnyMatch(subject.Organization, opts.AllowedO) {
+			if len(opts.AllowedO) > 0 && !containsAnyMatch(subject.Organization, oMatcher) {
 				return fmt.Errorf("client certificate organization is not allowed")
 			}
-			if len(opts.AllowedOU) > 0 && !containsAnyMatch(subject.OrganizationalUnit, opts.AllowedOU) {
+			if len(opts.AllowedOU) > 0 && !containsAnyMatch(subject.OrganizationalUnit, ouMatcher) {
 				return fmt.Errorf("client certificate organizational unit is not allowed")
 			}
 			return nil
@@ -75,29 +93,44 @@ func loadServerCertPool(caFile string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-func containsAnyMatch(values []string, allowed []string) bool {
+func containsAnyMatch(values []string, matcher allowedMatcher) bool {
 	for _, value := range values {
-		if matchesAllowed(value, allowed) {
+		if matcher.Match(value) {
 			return true
 		}
 	}
 	return false
 }
 
-func matchesAllowed(value string, allowed []string) bool {
+func compileAllowedMatcher(allowed []string) (allowedMatcher, error) {
+	matcher := allowedMatcher{
+		exact: make(map[string]struct{}),
+	}
 	for _, candidate := range allowed {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
 		if strings.HasPrefix(candidate, "regex:") {
 			pattern := strings.TrimPrefix(candidate, "regex:")
 			re, err := regexp.Compile(pattern)
 			if err != nil {
-				continue
+				return allowedMatcher{}, fmt.Errorf("invalid regex %q: %w", pattern, err)
 			}
-			if re.MatchString(value) {
-				return true
-			}
+			matcher.regexp = append(matcher.regexp, re)
 			continue
 		}
-		if candidate == value {
+		matcher.exact[candidate] = struct{}{}
+	}
+	return matcher, nil
+}
+
+func (m allowedMatcher) Match(value string) bool {
+	if _, ok := m.exact[value]; ok {
+		return true
+	}
+	for _, re := range m.regexp {
+		if re.MatchString(value) {
 			return true
 		}
 	}

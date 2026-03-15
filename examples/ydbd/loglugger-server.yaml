@@ -1,5 +1,10 @@
 listen_addr: ":27312"
 writer_backend: "ydb"
+# Request body limits (bytes).
+# max_compressed_body_bytes limits raw HTTP body before decoding Content-Encoding.
+# max_decompressed_body_bytes limits decoded JSON payload size.
+max_compressed_body_bytes: 8388608
+max_decompressed_body_bytes: 33554432
 position_table: "loglugger_positions"
 field_mapping_file: "/opt/ydb/loglugger/config/field_mapping.yaml"
 message_regex: '^(?P<P_DTTM>[^ ]*) :(?P<P_SERVICE>[^ ]*) (?P<P_LEVEL>[^ ]*): (?P<P_MESSAGE>.*).*$'

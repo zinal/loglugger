@@ -16,10 +16,25 @@ import (
 
 // Handler handles batch submission requests.
 type Handler struct {
-	mapper    Mapper
-	writer    Writer
-	parser    MessageParser
-	table     string
+	mapper                  Mapper
+	writer                  Writer
+	parser                  MessageParser
+	table                   string
+	maxCompressedBodyBytes  int64
+	maxDecompressedBodyBytes int64
+}
+
+const (
+	defaultMaxCompressedBodyBytes   int64 = 8 << 20  // 8 MiB
+	defaultMaxDecompressedBodyBytes int64 = 32 << 20 // 32 MiB
+)
+
+// HandlerOptions controls request bounds for batch ingestion.
+type HandlerOptions struct {
+	// MaxCompressedBodyBytes limits the incoming HTTP request body size.
+	MaxCompressedBodyBytes int64
+	// MaxDecompressedBodyBytes limits the decoded payload size after Content-Encoding processing.
+	MaxDecompressedBodyBytes int64
 }
 
 // NewHandler creates a batch handler.
@@ -29,12 +44,30 @@ func NewHandler(mapper Mapper, writer Writer, table string) *Handler {
 
 // NewHandlerWithParser creates a batch handler with optional server-side message parser.
 func NewHandlerWithParser(mapper Mapper, writer Writer, table string, parser MessageParser) *Handler {
+	return NewHandlerWithOptions(mapper, writer, table, parser, HandlerOptions{})
+}
+
+// NewHandlerWithOptions creates a batch handler with optional parser and request size limits.
+func NewHandlerWithOptions(mapper Mapper, writer Writer, table string, parser MessageParser, opts HandlerOptions) *Handler {
+	opts = normalizeHandlerOptions(opts)
 	return &Handler{
-		mapper:    mapper,
-		writer:    writer,
-		parser:    parser,
-		table:     table,
+		mapper:                   mapper,
+		writer:                   writer,
+		parser:                   parser,
+		table:                    table,
+		maxCompressedBodyBytes:   opts.MaxCompressedBodyBytes,
+		maxDecompressedBodyBytes: opts.MaxDecompressedBodyBytes,
 	}
+}
+
+func normalizeHandlerOptions(opts HandlerOptions) HandlerOptions {
+	if opts.MaxCompressedBodyBytes <= 0 {
+		opts.MaxCompressedBodyBytes = defaultMaxCompressedBodyBytes
+	}
+	if opts.MaxDecompressedBodyBytes <= 0 {
+		opts.MaxDecompressedBodyBytes = defaultMaxDecompressedBodyBytes
+	}
+	return opts
 }
 
 // ServeHTTP implements http.Handler.
@@ -59,21 +92,45 @@ func (h *Handler) serveBatch(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "Content-Type must be application/json")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxCompressedBodyBytes)
 	body, closeFn, err := decodeRequestBody(r)
 	if err != nil {
+		if isRequestTooLarge(err) {
+			h.writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
+			return
+		}
 		h.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	defer closeFn()
 
+	payload, err := io.ReadAll(io.LimitReader(body, h.maxDecompressedBodyBytes+1))
+	if err != nil {
+		if isRequestTooLarge(err) {
+			h.writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
+			return
+		}
+		h.writeError(w, http.StatusBadRequest, "failed to read request body: "+err.Error())
+		return
+	}
+	if int64(len(payload)) > h.maxDecompressedBodyBytes {
+		h.writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
+		return
+	}
+
 	var req models.BatchRequest
-	if err := json.NewDecoder(body).Decode(&req); err != nil {
+	if err := json.Unmarshal(payload, &req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 
 	resp := h.handle(r.Context(), &req)
 	h.writeResponse(w, resp)
+}
+
+func isRequestTooLarge(err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	return errors.As(err, &maxBytesErr)
 }
 
 func decodeRequestBody(r *http.Request) (io.Reader, func(), error) {

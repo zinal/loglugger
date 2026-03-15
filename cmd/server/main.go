@@ -17,28 +17,30 @@ import (
 )
 
 type serverConfig struct {
-	ListenAddr           string   `json:"listen_addr" yaml:"listen_addr"`
-	WriterBackend        string   `json:"writer_backend" yaml:"writer_backend"`
-	YDBEndpoint          string   `json:"ydb_endpoint" yaml:"ydb_endpoint"`
-	YDBDatabase          string   `json:"ydb_database" yaml:"ydb_database"`
-	YDBTable             string   `json:"ydb_table" yaml:"ydb_table"`
-	YDBAuthMode          string   `json:"ydb_auth_mode" yaml:"ydb_auth_mode"`
-	YDBAuthLogin         string   `json:"ydb_auth_login" yaml:"ydb_auth_login"`
-	YDBAuthPassword      string   `json:"ydb_auth_password" yaml:"ydb_auth_password"`
-	YDBAuthSACredentials string   `json:"ydb_auth_sa_key_file" yaml:"ydb_auth_sa_key_file"`
-	YDBAuthMetadataURL   string   `json:"ydb_auth_metadata_url" yaml:"ydb_auth_metadata_url"`
-	YDBCAPath            string   `json:"ydb_ca_path" yaml:"ydb_ca_path"`
-	PositionTable        string   `json:"position_table" yaml:"position_table"`
-	FieldMappingFile     string   `json:"field_mapping_file" yaml:"field_mapping_file"`
-	MessageRegex         string   `json:"message_regex" yaml:"message_regex"`
-	MessageRegexNoMatch  string   `json:"message_regex_no_match" yaml:"message_regex_no_match"`
-	ConvertTimeToLocalTZ bool     `json:"convert_time_to_local_tz" yaml:"convert_time_to_local_tz"`
-	TLSCertFile          string   `json:"tls_cert_file" yaml:"tls_cert_file"`
-	TLSKeyFile           string   `json:"tls_key_file" yaml:"tls_key_file"`
-	TLSCAFile            string   `json:"tls_ca_file" yaml:"tls_ca_file"`
-	TLSClientSubjectCN   []string `json:"tls_client_subject_cn" yaml:"tls_client_subject_cn"`
-	TLSClientSubjectO    []string `json:"tls_client_subject_o" yaml:"tls_client_subject_o"`
-	TLSClientSubjectOU   []string `json:"tls_client_subject_ou" yaml:"tls_client_subject_ou"`
+	ListenAddr               string   `json:"listen_addr" yaml:"listen_addr"`
+	WriterBackend            string   `json:"writer_backend" yaml:"writer_backend"`
+	MaxCompressedBodyBytes   int64    `json:"max_compressed_body_bytes" yaml:"max_compressed_body_bytes"`
+	MaxDecompressedBodyBytes int64    `json:"max_decompressed_body_bytes" yaml:"max_decompressed_body_bytes"`
+	YDBEndpoint              string   `json:"ydb_endpoint" yaml:"ydb_endpoint"`
+	YDBDatabase              string   `json:"ydb_database" yaml:"ydb_database"`
+	YDBTable                 string   `json:"ydb_table" yaml:"ydb_table"`
+	YDBAuthMode              string   `json:"ydb_auth_mode" yaml:"ydb_auth_mode"`
+	YDBAuthLogin             string   `json:"ydb_auth_login" yaml:"ydb_auth_login"`
+	YDBAuthPassword          string   `json:"ydb_auth_password" yaml:"ydb_auth_password"`
+	YDBAuthSACredentials     string   `json:"ydb_auth_sa_key_file" yaml:"ydb_auth_sa_key_file"`
+	YDBAuthMetadataURL       string   `json:"ydb_auth_metadata_url" yaml:"ydb_auth_metadata_url"`
+	YDBCAPath                string   `json:"ydb_ca_path" yaml:"ydb_ca_path"`
+	PositionTable            string   `json:"position_table" yaml:"position_table"`
+	FieldMappingFile         string   `json:"field_mapping_file" yaml:"field_mapping_file"`
+	MessageRegex             string   `json:"message_regex" yaml:"message_regex"`
+	MessageRegexNoMatch      string   `json:"message_regex_no_match" yaml:"message_regex_no_match"`
+	ConvertTimeToLocalTZ     bool     `json:"convert_time_to_local_tz" yaml:"convert_time_to_local_tz"`
+	TLSCertFile              string   `json:"tls_cert_file" yaml:"tls_cert_file"`
+	TLSKeyFile               string   `json:"tls_key_file" yaml:"tls_key_file"`
+	TLSCAFile                string   `json:"tls_ca_file" yaml:"tls_ca_file"`
+	TLSClientSubjectCN       []string `json:"tls_client_subject_cn" yaml:"tls_client_subject_cn"`
+	TLSClientSubjectO        []string `json:"tls_client_subject_o" yaml:"tls_client_subject_o"`
+	TLSClientSubjectOU       []string `json:"tls_client_subject_ou" yaml:"tls_client_subject_ou"`
 }
 
 func main() {
@@ -74,7 +76,16 @@ func main() {
 		slog.Error("create server parser", "error", err)
 		os.Exit(1)
 	}
-	handler := server.NewHandlerWithParser(mapper, writer, fullTablePath(cfg.YDBDatabase, cfg.YDBTable), parser)
+	handler := server.NewHandlerWithOptions(
+		mapper,
+		writer,
+		fullTablePath(cfg.YDBDatabase, cfg.YDBTable),
+		parser,
+		server.HandlerOptions{
+			MaxCompressedBodyBytes:   cfg.MaxCompressedBodyBytes,
+			MaxDecompressedBodyBytes: cfg.MaxDecompressedBodyBytes,
+		},
+	)
 	mux := http.NewServeMux()
 	mux.Handle("/v1/positions", handler)
 	mux.Handle("/v1/batches", handler)
@@ -126,12 +137,14 @@ func parseServerConfig() (serverConfig, error) {
 
 func defaultServerConfig() serverConfig {
 	return serverConfig{
-		ListenAddr:          ":27312",
-		WriterBackend:       "mock",
-		YDBTable:            "logs",
-		YDBAuthMode:         "anonymous",
-		PositionTable:       "loglugger_positions",
-		MessageRegexNoMatch: string(server.NoMatchSendRaw),
+		ListenAddr:               ":27312",
+		WriterBackend:            "mock",
+		MaxCompressedBodyBytes:   8 << 20,
+		MaxDecompressedBodyBytes: 32 << 20,
+		YDBTable:                 "logs",
+		YDBAuthMode:              "anonymous",
+		PositionTable:            "loglugger_positions",
+		MessageRegexNoMatch:      string(server.NoMatchSendRaw),
 	}
 }
 

@@ -33,6 +33,10 @@ Server config file:
 - See `examples/config/server.yaml` for all supported keys.
 - Optional CLI override: `-listen :27312` (overrides `listen_addr` from config).
 - The client fetches its startup position from `GET /v1/positions?client_id=...` and does not keep a local position file.
+- Request-size protection is configurable:
+  - `max_compressed_body_bytes`: maximum raw HTTP request body size before decoding `Content-Encoding`.
+  - `max_decompressed_body_bytes`: maximum decoded JSON payload size after decompression.
+  - Defaults: `8388608` (8 MiB) and `33554432` (32 MiB).
 
 **Client** (Linux only):
 ```bash
@@ -99,6 +103,11 @@ If you want the server to enforce client subject checks as well as CA trust, sta
 ```bash
 ./bin/server -config examples/config/server.yaml
 ```
+
+When using `tls_client_subject_cn`, `tls_client_subject_o`, or `tls_client_subject_ou` with entries like `regex:<pattern>`:
+
+- Regexes are compiled and validated at server startup.
+- Invalid regex patterns now fail fast with a config error (instead of being ignored at handshake time).
 
 For a local mock-backed end-to-end run:
 
