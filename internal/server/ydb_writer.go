@@ -249,7 +249,9 @@ func encodeYDBValue(value interface{}) (types.Value, error) {
 	case float64:
 		return types.DoubleValue(v), nil
 	case time.Time:
-		return types.TimestampValueFromTime(v), nil
+		// Mapping transforms `timestamp64` and `timestamp64_us` produce `time.Time`.
+		// Encode as YDB Timestamp64 (microseconds since Unix epoch), not Timestamp.
+		return types.Timestamp64Value(v.UTC().UnixMicro()), nil
 	default:
 		return nil, fmt.Errorf("unsupported YDB value type %T", value)
 	}
