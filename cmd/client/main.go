@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/url"
 	"os"
 	"os/signal"
@@ -39,6 +40,7 @@ type clientConfig struct {
 func main() {
 	cfg := parseClientConfig()
 	setupClientLogger(cfg.Debug)
+	slog.Debug("startup server order after shuffle", "shuffled_servers", strings.Join(cfg.ServerURLs, ","))
 
 	if cfg.ClientID == "" {
 		hostname, _ := os.Hostname()
@@ -160,7 +162,7 @@ func parseClientConfig() clientConfig {
 	flag.BoolVar(&cfg.TLSUseSystemPool, "tls-use-system-pool", false, "Use system CA pool")
 	flag.BoolVar(&cfg.Debug, "debug", parseEnvBool("LOGLUGGER_DEBUG", false), "Enable debug logging (or set LOGLUGGER_DEBUG=true)")
 	_ = flag.CommandLine.Parse(normalizeBoolFlagArgs(os.Args[1:], "debug"))
-	cfg.ServerURLs = parseServerURLs(*serverList)
+	cfg.ServerURLs = shuffleServerURLs(parseServerURLs(*serverList))
 	return cfg
 }
 
@@ -246,6 +248,22 @@ func parseServerURLs(raw string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+func shuffleServerURLs(urls []string) []string {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return shuffleServerURLsWith(urls, rng.Shuffle)
+}
+
+func shuffleServerURLsWith(urls []string, shuffle func(n int, swap func(i, j int))) []string {
+	shuffled := append([]string(nil), urls...)
+	if len(shuffled) < 2 {
+		return shuffled
+	}
+	shuffle(len(shuffled), func(i, j int) {
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	})
+	return shuffled
 }
 
 func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bool, error) {

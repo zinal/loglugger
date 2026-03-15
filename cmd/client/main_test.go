@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -190,7 +191,7 @@ func TestParseClientConfigParsesServerList(t *testing.T) {
 	}
 	cfg := parseClientConfig()
 	want := []string{"https://a:27312", "https://b:27312"}
-	if !reflect.DeepEqual(cfg.ServerURLs, want) {
+	if !sameStringsIgnoringOrder(cfg.ServerURLs, want) {
 		t.Fatalf("ServerURLs = %v, want %v", cfg.ServerURLs, want)
 	}
 }
@@ -237,8 +238,25 @@ func TestParseClientConfigDebugTrueDoesNotBreakFollowingFlags(t *testing.T) {
 		t.Fatalf("BatchSize = %d, want 123", cfg.BatchSize)
 	}
 	want := []string{"https://a:27312", "https://b:27312"}
-	if !reflect.DeepEqual(cfg.ServerURLs, want) {
+	if !sameStringsIgnoringOrder(cfg.ServerURLs, want) {
 		t.Fatalf("ServerURLs = %v, want %v", cfg.ServerURLs, want)
+	}
+}
+
+func TestShuffleServerURLsWith(t *testing.T) {
+	input := []string{"https://a:27312", "https://b:27312", "https://c:27312"}
+	got := shuffleServerURLsWith(input, func(n int, swap func(i, j int)) {
+		if n != len(input) {
+			t.Fatalf("shuffle n = %d, want %d", n, len(input))
+		}
+		swap(0, 2)
+	})
+	want := []string{"https://c:27312", "https://b:27312", "https://a:27312"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("shuffleServerURLsWith() = %v, want %v", got, want)
+	}
+	if !reflect.DeepEqual(input, []string{"https://a:27312", "https://b:27312", "https://c:27312"}) {
+		t.Fatalf("input mutated = %v", input)
 	}
 }
 
@@ -248,6 +266,17 @@ func TestNormalizeBoolFlagArgs(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalizeBoolFlagArgs() = %v, want %v", got, want)
 	}
+}
+
+func sameStringsIgnoringOrder(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	leftCopy := append([]string(nil), left...)
+	rightCopy := append([]string(nil), right...)
+	sort.Strings(leftCopy)
+	sort.Strings(rightCopy)
+	return reflect.DeepEqual(leftCopy, rightCopy)
 }
 
 type stubSender struct {
