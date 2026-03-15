@@ -376,6 +376,40 @@ func TestHandler_GetPositionErrorReturnsGenericMessage(t *testing.T) {
 	}
 }
 
+func TestHandler_InternalMappingErrorIsSanitizedForClient(t *testing.T) {
+	handler := NewHandler(
+		NewMapper([]FieldMapping{{Source: "message", Destination: "x", Transform: "int"}}),
+		NewMockWriter(),
+		"logs",
+	)
+	req := &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "pos-1",
+		Records:      []models.Record{{Message: "hello"}},
+	}
+	body, _ := json.Marshal(req)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	var resp models.BatchResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != "error" {
+		t.Fatalf("status = %q, want error", resp.Status)
+	}
+	if resp.Message != genericStorageErrorMessage {
+		t.Fatalf("message = %q, want %q", resp.Message, genericStorageErrorMessage)
+	}
+}
+
 func TestHandler_RejectsMissingCurrentPositionWithoutReset(t *testing.T) {
 	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
 	req := &models.BatchRequest{

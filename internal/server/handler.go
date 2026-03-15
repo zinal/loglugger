@@ -281,22 +281,29 @@ func (h *Handler) mapRecords(clientID string, records []models.Record) ([]map[st
 
 func (h *Handler) writeResponse(w http.ResponseWriter, resp *models.BatchResponse) {
 	status := http.StatusOK
+	respOut := *resp
 	switch resp.Status {
 	case "position_mismatch":
 		status = http.StatusConflict
 	case "error":
-		if resp.Message == "client_id is required" || resp.Message == "next_position is required" ||
-			resp.Message == "current_position is required when reset is false" ||
-			resp.Message == "missing current_position or reset required" ||
-			(len(resp.Message) > 6 && resp.Message[:6] == "invalid") {
+		if respOut.Message == "client_id is required" || respOut.Message == "next_position is required" ||
+			respOut.Message == "current_position is required when reset is false" ||
+			respOut.Message == "missing current_position or reset required" ||
+			(len(respOut.Message) > 6 && respOut.Message[:6] == "invalid") {
 			status = http.StatusBadRequest
 		} else {
 			status = http.StatusInternalServerError
 		}
 	}
+	if status == http.StatusInternalServerError && respOut.Status == "error" {
+		if respOut.Message != genericStorageErrorMessage {
+			slog.Error("internal batch processing failure", "message", respOut.Message)
+		}
+		respOut.Message = genericStorageErrorMessage
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(&respOut)
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, status int, msg string) {
@@ -307,14 +314,21 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, msg string) {
 
 func (h *Handler) writePositionResponse(w http.ResponseWriter, resp *models.PositionResponse) {
 	status := http.StatusOK
-	if resp.Status == "error" {
-		if resp.Message == "client_id is required" {
+	respOut := *resp
+	if respOut.Status == "error" {
+		if respOut.Message == "client_id is required" {
 			status = http.StatusBadRequest
 		} else {
 			status = http.StatusInternalServerError
 		}
 	}
+	if status == http.StatusInternalServerError && respOut.Status == "error" {
+		if respOut.Message != genericStorageErrorMessage {
+			slog.Error("internal position processing failure", "message", respOut.Message)
+		}
+		respOut.Message = genericStorageErrorMessage
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(&respOut)
 }
