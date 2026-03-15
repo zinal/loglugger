@@ -416,10 +416,10 @@ loglugger/
 | client_id | string | hostname | Unique client identifier |
 | service_mask | string | "" | Filter mask for `_SYSTEMD_UNIT` (empty = no filter) |
 | **Message parsing** | | | |
-| batch_size | int | 1000 | Max records per batch (also constrained by the fixed 10 MB uncompressed log-data limit per request) |
+| batch_size | int | 50000 | Max records per batch (also constrained by the fixed 10 MB uncompressed log-data limit per request) |
 | batch_timeout | duration | 5s | Max time before flushing partial batch |
 | http_timeout | duration | 30s | HTTP request timeout |
-| retry_base_delay | duration | 1s | Base delay for exponential backoff |
+| retry_delay | duration | 1s | Base delay for exponential backoff |
 | **TLS** | | | |
 | tls_ca_file | string | — | Path to PEM file with CA certs for server verification |
 | tls_cert_file | string | — | Path to client certificate (PEM) for mTLS |
@@ -454,9 +454,9 @@ loglugger/
 | tls_cert_file | string | — | Path to server certificate (PEM) |
 | tls_key_file | string | — | Path to server private key (PEM) |
 | tls_ca_file | string | — | Path to PEM file with CA certs for client verification |
-| tls_client_subject_cn | string/list | — | Required CN value(s) in client certificate subject |
-| tls_client_subject_o | string/list | — | Required O value(s) in client certificate subject |
-| tls_client_subject_ou | string/list | — | Required OU value(s) in client certificate subject |
+| tls_client_subject_cn | list | — | Required CN value(s) in client certificate subject |
+| tls_client_subject_o | list | — | Required O value(s) in client certificate subject |
+| tls_client_subject_ou | list | — | Required OU value(s) in client certificate subject |
 
 **Server startup**: Most server settings are read from `config_file` (`-config` CLI flag). `listen_addr` may be overridden with `-listen` for quick local overrides.
 
@@ -503,11 +503,11 @@ The server configuration defines which subject attributes are required and their
 
 | Attribute | Config key example | Format | Description |
 |-----------|-------------------|--------|-------------|
-| CN | `tls_client_subject_cn` | string or list | Required Common Name(s) |
-| O | `tls_client_subject_o` | string or list | Required Organization(s) |
-| OU | `tls_client_subject_ou` | string or list | Required Organizational Unit(s) |
+| CN | `tls_client_subject_cn` | list | Required Common Name(s) |
+| O | `tls_client_subject_o` | list | Required Organization(s) |
+| OU | `tls_client_subject_ou` | list | Required Organizational Unit(s) |
 
-If multiple values are provided (list), the certificate subject value must match at least one. All configured attributes must be present and match.
+Each configured attribute is provided as a list. The certificate subject value must match at least one configured entry for that attribute. All configured attributes must be present and match.
 
 ### 9.4 Golang Implementation Notes
 

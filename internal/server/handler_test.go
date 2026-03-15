@@ -61,6 +61,31 @@ func TestHandler_ResetBatch(t *testing.T) {
 	}
 }
 
+func TestHandler_ResetBatchSkipsPositionValidation(t *testing.T) {
+	writer := &resetWriterSpy{}
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), writer, "logs")
+
+	resp := handler.handle(context.Background(), &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "pos-1",
+		Records:      []models.Record{{Message: "hello"}},
+	})
+
+	if resp.Status != "ok" {
+		t.Fatalf("status = %q, want ok", resp.Status)
+	}
+	if writer.getCalled {
+		t.Fatal("reset batch should not read stored position")
+	}
+	if writer.setCalled {
+		t.Fatal("reset batch should not use compare-and-set position update")
+	}
+	if !writer.setUnconditionalCalled {
+		t.Fatal("reset batch should use unconditional position update")
+	}
+}
+
 func TestHandler_PositionMismatch(t *testing.T) {
 	ctx := context.Background()
 	mapper := NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}})
@@ -281,7 +306,7 @@ func TestHandler_WriteFailureDoesNotAdvancePosition(t *testing.T) {
 }
 
 func TestHandler_PositionStoreErrorReturnsFailure(t *testing.T) {
-	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), positionWriterStub{setErr: errors.New("store failed")}, "logs")
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), positionWriterStub{resetErr: errors.New("store failed")}, "logs")
 
 	resp := handler.handle(context.Background(), &models.BatchRequest{
 		ClientID:     "client-1",
@@ -307,6 +332,32 @@ func TestHandler_RejectsRecordWithoutMessage(t *testing.T) {
 	})
 	if resp.Status != "error" {
 		t.Fatalf("status = %q, want error", resp.Status)
+	}
+}
+
+func TestHandler_RejectsMissingCurrentPositionWithoutReset(t *testing.T) {
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), NewMockWriter(), "logs")
+	req := &models.BatchRequest{
+		ClientID:     "client-1",
+		NextPosition: "pos-1",
+		Records:      []models.Record{{Message: "hello"}},
+	}
+	body, _ := json.Marshal(req)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	var resp models.BatchResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Message != "current_position is required when reset is false" {
+		t.Fatalf("message = %q", resp.Message)
 	}
 }
 
@@ -514,11 +565,17 @@ func (w errorWriter) SetPosition(ctx context.Context, clientID, expectedPosition
 	return nil
 }
 
+func (w errorWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string) error {
+	w.positions[clientID] = nextPosition
+	return nil
+}
+
 type positionWriterStub struct {
 	getPos string
 	getOK  bool
 	getErr error
 	setErr error
+	resetErr error
 }
 
 func (s positionWriterStub) BulkUpsert(ctx context.Context, table string, rows []map[string]interface{}) error {
@@ -531,4 +588,33 @@ func (s positionWriterStub) GetPosition(ctx context.Context, clientID string) (s
 
 func (s positionWriterStub) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
 	return s.setErr
+}
+
+func (s positionWriterStub) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string) error {
+	return s.resetErr
+}
+
+type resetWriterSpy struct {
+	getCalled              bool
+	setCalled              bool
+	setUnconditionalCalled bool
+}
+
+func (w *resetWriterSpy) BulkUpsert(ctx context.Context, table string, rows []map[string]interface{}) error {
+	return nil
+}
+
+func (w *resetWriterSpy) GetPosition(ctx context.Context, clientID string) (string, bool, error) {
+	w.getCalled = true
+	return "pos-old", true, nil
+}
+
+func (w *resetWriterSpy) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
+	w.setCalled = true
+	return &PositionMismatchError{CurrentPosition: "pos-new", Found: true}
+}
+
+func (w *resetWriterSpy) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string) error {
+	w.setUnconditionalCalled = true
+	return nil
 }

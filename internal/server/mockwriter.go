@@ -51,3 +51,10 @@ func (w *MockWriter) SetPosition(ctx context.Context, clientID, expectedPosition
 	w.positions[clientID] = nextPosition
 	return nil
 }
+
+func (w *MockWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.positions[clientID] = nextPosition
+	return nil
+}

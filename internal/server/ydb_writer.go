@@ -161,6 +161,31 @@ VALUES ($client_id, $new_expected_position);
 	return nil
 }
 
+func (w *YDBWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string) error {
+	err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
+		_, _, err := session.Execute(
+			ctx,
+			table.SerializableReadWriteTxControl(table.CommitTx()),
+			fmt.Sprintf(`
+DECLARE $client_id AS Utf8;
+DECLARE $new_expected_position AS Utf8;
+
+UPSERT INTO %s (client_id, expected_position)
+VALUES ($client_id, $new_expected_position);
+`, quoteYDBPath(w.positionTable)),
+			ydb.ParamsBuilder().
+				Param("$client_id").Text(clientID).
+				Param("$new_expected_position").Text(nextPosition).
+				Build(),
+		)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("store expected position in %s: %w", w.positionTable, err)
+	}
+	return nil
+}
+
 type ydbRowBatch struct {
 	columns []string
 	rows    []map[string]interface{}

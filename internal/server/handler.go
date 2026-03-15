@@ -169,6 +169,9 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 	if req.NextPosition == "" {
 		return &models.BatchResponse{Status: "error", Message: "next_position is required"}
 	}
+	if !req.Reset && req.CurrentPosition == "" {
+		return &models.BatchResponse{Status: "error", Message: "current_position is required when reset is false"}
+	}
 	for i := range req.Records {
 		if err := validateRecord(req.Records[i]); err != nil {
 			return &models.BatchResponse{Status: "error", Message: fmt.Sprintf("invalid records[%d]: %v", i, err)}
@@ -176,13 +179,6 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 	}
 
 	if req.Reset {
-		expected, ok, err := h.writer.GetPosition(ctx, req.ClientID)
-		if err != nil {
-			return &models.BatchResponse{Status: "error", Message: err.Error()}
-		}
-		if !ok {
-			expected = ""
-		}
 		if len(req.Records) > 0 {
 			rows, err := h.mapRecords(req.ClientID, req.Records)
 			if err != nil {
@@ -192,10 +188,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 				return &models.BatchResponse{Status: "error", Message: err.Error()}
 			}
 		}
-		if err := h.writer.SetPosition(ctx, req.ClientID, expected, req.NextPosition); err != nil {
-			if resp := h.positionMismatchResponse(err); resp != nil {
-				return resp
-			}
+		if err := h.writer.SetPositionUnconditional(ctx, req.ClientID, req.NextPosition); err != nil {
 			return &models.BatchResponse{Status: "error", Message: fmt.Sprintf("store next position: %v", err)}
 		}
 		return &models.BatchResponse{Status: "ok", NextPosition: req.NextPosition}
@@ -281,6 +274,7 @@ func (h *Handler) writeResponse(w http.ResponseWriter, resp *models.BatchRespons
 		status = http.StatusConflict
 	case "error":
 		if resp.Message == "client_id is required" || resp.Message == "next_position is required" ||
+			resp.Message == "current_position is required when reset is false" ||
 			resp.Message == "missing current_position or reset required" ||
 			(len(resp.Message) > 6 && resp.Message[:6] == "invalid") {
 			status = http.StatusBadRequest

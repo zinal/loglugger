@@ -182,14 +182,22 @@ func parseServerURLs(raw string) []string {
 func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bool, error) {
 	resp, err := sender.CurrentPosition(ctx)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return "", true, err
-		}
-		slog.Warn("fetch startup position", "error", err)
+		return "", false, err
+	}
+	if resp == nil {
+		return "", false, fmt.Errorf("position lookup returned empty response")
+	}
+	if resp.Status == "not_found" {
 		return "", true, nil
 	}
-	if resp == nil || resp.Status == "not_found" || resp.CurrentPosition == "" {
-		return "", true, nil
+	if resp.Status != "ok" {
+		if resp.Message != "" {
+			return "", false, fmt.Errorf("position lookup failed: %s", resp.Message)
+		}
+		return "", false, fmt.Errorf("position lookup failed: unexpected status %q", resp.Status)
+	}
+	if resp.CurrentPosition == "" {
+		return "", false, fmt.Errorf("position lookup returned empty current_position")
 	}
 	return resp.CurrentPosition, false, nil
 }

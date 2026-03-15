@@ -52,8 +52,38 @@ func TestFetchStartupPositionCanceled(t *testing.T) {
 	if position != "" {
 		t.Fatalf("position = %q, want empty", position)
 	}
-	if !reset {
-		t.Fatal("expected reset=true on cancellation")
+	if reset {
+		t.Fatal("expected reset=false on cancellation error")
+	}
+}
+
+func TestFetchStartupPositionPropagatesLookupError(t *testing.T) {
+	position, reset, err := fetchStartupPosition(context.Background(), stubSender{
+		err: client.ErrClientError{Message: "bad request"},
+	})
+	if err == nil {
+		t.Fatal("expected lookup error")
+	}
+	if position != "" {
+		t.Fatalf("position = %q, want empty", position)
+	}
+	if reset {
+		t.Fatal("expected reset=false on lookup error")
+	}
+}
+
+func TestFetchStartupPositionRejectsMalformedOKResponse(t *testing.T) {
+	position, reset, err := fetchStartupPosition(context.Background(), stubSender{
+		positionResp: &models.PositionResponse{Status: "ok"},
+	})
+	if err == nil {
+		t.Fatal("expected malformed response error")
+	}
+	if position != "" {
+		t.Fatalf("position = %q, want empty", position)
+	}
+	if reset {
+		t.Fatal("expected reset=false on malformed response")
 	}
 }
 
