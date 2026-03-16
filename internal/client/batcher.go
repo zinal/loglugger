@@ -54,21 +54,28 @@ func (b *batcher) Flush() *Batch {
 		return nil
 	}
 
-	count := len(b.entries)
-	if b.maxSize > 0 && count > b.maxSize {
-		count = b.maxSize
-	}
 	batchBytes := 0
 	fitCount := 0
-	for i := 0; i < count; i++ {
+	realCount := 0
+	nextPos := ""
+	for i := 0; i < len(b.entries); i++ {
+		entry := b.entries[i]
 		size := b.entrySizes[i]
-		if fitCount > 0 && batchBytes+size > b.maxDataBytes {
+		isJournalPosition := entry.Cursor != ""
+		if fitCount > 0 && batchBytes+size > b.maxDataBytes && realCount > 0 {
+			break
+		}
+		if b.maxSize > 0 && isJournalPosition && realCount >= b.maxSize {
 			break
 		}
 		batchBytes += size
 		fitCount++
+		if isJournalPosition {
+			realCount++
+			nextPos = entry.Cursor
+		}
 	}
-	if fitCount == 0 {
+	if fitCount == 0 || nextPos == "" {
 		return nil
 	}
 
@@ -77,7 +84,6 @@ func (b *batcher) Flush() *Batch {
 		records[i] = e.Record
 	}
 	currentPos := b.entries[0].Position
-	nextPos := b.entries[fitCount-1].Cursor
 	batch := &Batch{
 		Records:         records,
 		CurrentPosition: currentPos,
@@ -98,6 +104,16 @@ func (b *batcher) Flush() *Batch {
 }
 
 func (b *batcher) ShouldFlush() bool {
+	hasJournalPosition := false
+	for _, entry := range b.entries {
+		if entry.Cursor != "" {
+			hasJournalPosition = true
+			break
+		}
+	}
+	if !hasJournalPosition {
+		return false
+	}
 	if b.maxSize > 0 && len(b.entries) >= b.maxSize {
 		return true
 	}

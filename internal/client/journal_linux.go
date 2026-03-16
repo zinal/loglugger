@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
 	"github.com/ydb-platform/loglugger/internal/models"
@@ -20,10 +21,13 @@ type journalReader struct {
 	cfg            JournalConfig
 	last           string
 	lastRealtime   uint64
+	lastMonotonic  uint64
 	exactMatch     string
-	pending        *JournalEntry
+	pending        []*JournalEntry
 	serviceMatcher serviceMatcher
 }
+
+const recoveryMessageText = "log reading has been recovered from a severe error; some log data may have been lost"
 
 // NewJournalReader creates a journal reader. Only available on Linux.
 func NewJournalReader(cfg JournalConfig) (JournalReader, error) {
@@ -71,6 +75,7 @@ func (r *journalReader) SeekToPosition(ctx context.Context, position string) err
 		}
 		r.last = ""
 		r.lastRealtime = 0
+		r.lastMonotonic = 0
 		r.pending = nil
 		return nil
 	}
@@ -84,39 +89,40 @@ func (r *journalReader) SeekToPosition(ctx context.Context, position string) err
 }
 
 func (r *journalReader) Next(ctx context.Context) (*JournalEntry, error) {
-	if r.pending != nil {
-		entry := r.pending
-		r.pending = nil
+	if len(r.pending) > 0 {
+		entry := r.pending[0]
+		r.pending = r.pending[1:]
 		return entry, nil
 	}
-	entry, nextCursor, nextRealtime, err := r.readNext(ctx, r.j, r.last)
+	entry, nextCursor, nextRealtime, nextMonotonic, err := r.readNext(ctx, r.j, r.last)
 	if err != nil {
 		return nil, err
 	}
 	if entry != nil {
 		r.last = nextCursor
 		r.lastRealtime = nextRealtime
+		r.lastMonotonic = nextMonotonic
 	}
 	return entry, nil
 }
 
-func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last string) (*JournalEntry, string, uint64, error) {
+func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last string) (*JournalEntry, string, uint64, uint64, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, "", 0, ctx.Err()
+			return nil, "", 0, 0, ctx.Err()
 		default:
 		}
 		n, err := j.Next()
 		if err != nil {
-			return nil, "", 0, err
+			return nil, "", 0, 0, err
 		}
 		if n == 0 {
-			return nil, last, r.lastRealtime, nil
+			return nil, last, r.lastRealtime, r.lastMonotonic, nil
 		}
 		entry, err := j.GetEntry()
 		if err != nil {
-			return nil, "", 0, fmt.Errorf("get entry: %w", err)
+			return nil, "", 0, 0, fmt.Errorf("get entry: %w", err)
 		}
 		rec := journalEntryToRecord(entry)
 		if !r.serviceMatcher.Match(rec.SystemdUnit) {
@@ -127,7 +133,11 @@ func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last
 		if rec.RealtimeTimestamp != nil && *rec.RealtimeTimestamp >= 0 {
 			nextRealtime = uint64(*rec.RealtimeTimestamp)
 		}
-		return &JournalEntry{Record: rec, Position: last, Cursor: entry.Cursor}, entry.Cursor, nextRealtime, nil
+		nextMonotonic := entry.MonotonicTimestamp
+		if rec.MonotonicTimestamp != nil {
+			nextMonotonic = *rec.MonotonicTimestamp
+		}
+		return &JournalEntry{Record: rec, Position: last, Cursor: entry.Cursor}, entry.Cursor, nextRealtime, nextMonotonic, nil
 	}
 }
 
@@ -135,8 +145,12 @@ func (r *journalReader) Recover(ctx context.Context) (bool, error) {
 	if r.j == nil {
 		return false, fmt.Errorf("journal is not open")
 	}
+	previousCursor := r.last
+	previousRealtime := r.lastRealtime
+	previousMonotonic := r.lastMonotonic
 	cursorErr := r.recoverFromCursor(ctx)
 	if cursorErr == nil {
+		r.prependRecoveryMessage(previousCursor, previousRealtime, previousMonotonic)
 		return true, nil
 	}
 	if r.lastRealtime == 0 {
@@ -146,6 +160,7 @@ func (r *journalReader) Recover(ctx context.Context) (bool, error) {
 	if realtimeErr != nil {
 		return false, fmt.Errorf("resume from last known cursor failed: %w; resume after the last good timestamp failed: %w", cursorErr, realtimeErr)
 	}
+	r.prependRecoveryMessage(previousCursor, previousRealtime, previousMonotonic)
 	return true, nil
 }
 
@@ -183,7 +198,7 @@ func (r *journalReader) recoverFromRealtime(ctx context.Context) error {
 }
 
 func (r *journalReader) swapRecoveredJournal(ctx context.Context, j *sdjournal.Journal, last string) error {
-	entry, nextCursor, nextRealtime, err := r.readNext(ctx, j, last)
+	entry, nextCursor, nextRealtime, nextMonotonic, err := r.readNext(ctx, j, last)
 	if err != nil {
 		j.Close()
 		return err
@@ -195,12 +210,61 @@ func (r *journalReader) swapRecoveredJournal(ctx context.Context, j *sdjournal.J
 		}
 	}
 	r.j = j
-	r.pending = entry
+	r.pending = nil
+	if entry != nil {
+		r.pending = append(r.pending, entry)
+	}
 	if entry != nil {
 		r.last = nextCursor
 		r.lastRealtime = nextRealtime
+		r.lastMonotonic = nextMonotonic
 	}
 	return nil
+}
+
+func (r *journalReader) prependRecoveryMessage(position string, realtimeUsec, monotonicUsec uint64) {
+	entry := newRecoveryJournalEntry(position, realtimeUsec, monotonicUsec)
+	r.pending = append([]*JournalEntry{entry}, r.pending...)
+}
+
+func newRecoveryJournalEntry(position string, realtimeUsec, monotonicUsec uint64) *JournalEntry {
+	const criticalPriority = 2
+	eventRealtime := int64(realtimeUsec)
+	if eventRealtime > 0 {
+		eventRealtime += 1000
+	}
+	eventMonotonic := monotonicUsec
+	if eventMonotonic > 0 {
+		eventMonotonic += 1000
+	}
+	record := models.Record{
+		Message:          recoveryLogMessage(eventRealtime),
+		Priority:         intPtr(criticalPriority),
+		SyslogIdentifier: "LOGLUGGER",
+		Fields:           make(map[string]string),
+	}
+	if eventRealtime > 0 {
+		record.RealtimeTimestamp = &eventRealtime
+	}
+	if eventMonotonic > 0 {
+		record.MonotonicTimestamp = &eventMonotonic
+	}
+	return &JournalEntry{
+		Record:   record,
+		Position: position,
+	}
+}
+
+func recoveryLogMessage(realtimeUsec int64) string {
+	if realtimeUsec <= 0 {
+		return ":LOGLUGGER CRITICAL: " + recoveryMessageText
+	}
+	timestamp := time.UnixMicro(realtimeUsec).UTC().Format(time.RFC3339Nano)
+	return fmt.Sprintf("%s :LOGLUGGER CRITICAL: %s", timestamp, recoveryMessageText)
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func journalEntryToRecord(e *sdjournal.JournalEntry) models.Record {
