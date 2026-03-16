@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -51,35 +50,7 @@ func openJournal(namespace string) (*sdjournal.Journal, error) {
 	if strings.ContainsRune(namespace, os.PathSeparator) {
 		return nil, fmt.Errorf("invalid journald namespace %q: must not contain path separators", namespace)
 	}
-	dir, err := findNamespaceJournalDir(namespace)
-	if err != nil {
-		return nil, err
-	}
-	return sdjournal.NewJournalFromDir(dir)
-}
-
-func findNamespaceJournalDir(namespace string) (string, error) {
-	searchRoots := []string{
-		"/var/log/journal",
-		"/run/log/journal",
-	}
-	for _, root := range searchRoots {
-		matches, err := filepath.Glob(filepath.Join(root, "*."+namespace))
-		if err != nil {
-			return "", fmt.Errorf("lookup journald namespace %q in %s: %w", namespace, root, err)
-		}
-		sort.Strings(matches)
-		for _, candidate := range matches {
-			info, err := os.Stat(candidate)
-			if err != nil {
-				continue
-			}
-			if info.IsDir() {
-				return candidate, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("journald namespace %q not found in /var/log/journal or /run/log/journal", namespace)
+	return sdjournal.NewJournalInNamespace(namespace)
 }
 
 func (r *journalReader) SeekToPosition(ctx context.Context, position string) error {

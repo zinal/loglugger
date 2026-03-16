@@ -10,6 +10,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+replace github.com/coreos/go-systemd/v22 => github.com/zinal/go-systemd v0.0.0-20260316155058-2966061f1d58
+
 require (
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
