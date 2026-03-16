@@ -129,6 +129,11 @@ func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last
 			// Keep continuity relative to last sent record only.
 			continue
 		}
+		if rec.Message == "" {
+			// The server rejects records without MESSAGE, so skip malformed
+			// journal entries instead of letting them poison the whole batch.
+			continue
+		}
 		nextRealtime := entry.RealtimeTimestamp
 		if rec.RealtimeTimestamp != nil && *rec.RealtimeTimestamp >= 0 {
 			nextRealtime = uint64(*rec.RealtimeTimestamp)
@@ -237,11 +242,20 @@ func newRecoveryJournalEntry(position string, realtimeUsec, monotonicUsec uint64
 	if eventMonotonic > 0 {
 		eventMonotonic += 1000
 	}
+	message := recoveryLogMessage(eventRealtime)
+	if message == "" {
+		message = ":LOGLUGGER CRITICAL: " + recoveryMessageText
+	}
 	record := models.Record{
-		Message:          recoveryLogMessage(eventRealtime),
+		Message:          message,
 		Priority:         intPtr(criticalPriority),
 		SyslogIdentifier: "LOGLUGGER",
-		Fields:           make(map[string]string),
+		SystemdUnit:      "LOGLUGGER",
+		Fields: map[string]string{
+			"MESSAGE":           message,
+			"SYSLOG_IDENTIFIER": "LOGLUGGER",
+			"_SYSTEMD_UNIT":     "LOGLUGGER",
+		},
 	}
 	if eventRealtime > 0 {
 		record.RealtimeTimestamp = &eventRealtime
