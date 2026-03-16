@@ -354,7 +354,7 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 		}
 		if err := journal.SeekToPosition(ctx, ""); err != nil {
 			slog.Error("seek head after mismatch", "error", err)
-			return reset
+			return true
 		}
 		return true
 	}
