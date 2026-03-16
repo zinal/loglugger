@@ -269,6 +269,58 @@ func TestSenderCurrentPositionFailsBackToPrimaryAfterRecovery(t *testing.T) {
 	}
 }
 
+func TestSenderSendTriesNextEndpointOnEachRetryAttempt(t *testing.T) {
+	hitOrder := make([]string, 0, 3)
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitOrder = append(hitOrder, "primary")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"error","message":"temporary-primary"}`))
+	}))
+	defer primary.Close()
+
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitOrder = append(hitOrder, "secondary")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"status":"error","message":"temporary-secondary"}`))
+	}))
+	defer secondary.Close()
+
+	tertiary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitOrder = append(hitOrder, "tertiary")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","next_position":"cursor-3"}`))
+	}))
+	defer tertiary.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{primary.URL, secondary.URL, tertiary.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+
+	resp, err := s.Send(context.Background(), &models.BatchRequest{
+		CurrentPosition: "cursor-1",
+		NextPosition:    "cursor-3",
+		Records:         []models.Record{{Message: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if resp == nil || resp.Status != "ok" || resp.NextPosition != "cursor-3" {
+		t.Fatalf("Send() response = %+v, want ok/cursor-3", resp)
+	}
+	wantOrder := []string{"primary", "secondary", "tertiary"}
+	if len(hitOrder) != len(wantOrder) {
+		t.Fatalf("hit order length = %d, want %d (%v)", len(hitOrder), len(wantOrder), hitOrder)
+	}
+	for i := range wantOrder {
+		if hitOrder[i] != wantOrder[i] {
+			t.Fatalf("hit order = %v, want %v", hitOrder, wantOrder)
+		}
+	}
+}
+
 func TestSenderSetsTLSHostPerEndpoint(t *testing.T) {
 	s := NewSender(SenderConfig{
 		ServerURLs:  []string{"https://host-a.example:27312", "https://host-b.example:9443"},

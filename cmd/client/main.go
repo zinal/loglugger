@@ -90,7 +90,7 @@ func main() {
 		os.Exit(1)
 	}
 	if err := journal.SeekToPosition(ctx, position); err != nil {
-		slog.Warn("seek failed, using reset", "position", position, "error", err)
+		slog.Warn("unable to seek to stored journal position; resetting to head", "position", position, "error", err)
 		reset = true
 		if err := journal.SeekToPosition(ctx, ""); err != nil {
 			slog.Error("seek head", "error", err)
@@ -310,12 +310,16 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 	}
 	slog.Debug("batch response received", "status", resp.Status, "expected_position", resp.ExpectedPosition, "message", resp.Message)
 	if resp.Status == "position_mismatch" {
-		slog.Info("position mismatch", "expected", resp.ExpectedPosition)
+		slog.Info("server reported position mismatch",
+			"current_position", batch.CurrentPosition,
+			"next_position", batch.NextPosition,
+			"expected_position", resp.ExpectedPosition,
+		)
 		if resp.ExpectedPosition != "" {
 			if err := journal.SeekToPosition(ctx, resp.ExpectedPosition); err == nil {
 				return false
 			}
-			slog.Warn("seek to expected position failed, using reset", "expected", resp.ExpectedPosition)
+			slog.Warn("unable to seek to expected journal position; resetting to head", "expected_position", resp.ExpectedPosition)
 		}
 		if err := journal.SeekToPosition(ctx, ""); err != nil {
 			slog.Error("seek head after mismatch", "error", err)

@@ -116,6 +116,7 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 		resp, err := endpoint.client.Do(httpReq)
 		if err != nil {
 			slog.Debug("send failed", "attempt", attempt+1, "endpoint", endpoint.baseURL, "error", err)
+			s.logCompletedRetryCycle("send batch", attempt+1)
 			s.advanceStartIndexOnFailure(endpointIdx)
 			continue
 		}
@@ -140,6 +141,7 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 		default:
 			if resp.StatusCode >= 500 {
 				slog.Debug("send got retriable HTTP status", "attempt", attempt+1, "endpoint", endpoint.baseURL, "status_code", resp.StatusCode, "message", batchResp.Message)
+				s.logCompletedRetryCycle("send batch", attempt+1)
 				s.advanceStartIndexOnFailure(endpointIdx)
 				continue
 			}
@@ -261,6 +263,17 @@ func (s *sender) markSuccess(successIndex int) {
 		return
 	}
 	atomic.StoreUint64(&s.nextIndex, 0)
+}
+
+func (s *sender) logCompletedRetryCycle(operation string, attempts int) {
+	if attempts <= 0 || len(s.endpoints) == 0 || attempts%len(s.endpoints) != 0 {
+		return
+	}
+	slog.Warn("all configured servers failed; continuing retries",
+		"operation", operation,
+		"attempts", attempts,
+		"server_count", len(s.endpoints),
+	)
 }
 
 // ErrClientError indicates a client error (4xx) that should not be retried.
