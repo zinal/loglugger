@@ -19,27 +19,23 @@ type journalReader struct {
 	j              *sdjournal.Journal
 	cfg            JournalConfig
 	last           string
+	lastRealtime   uint64
+	exactMatch     string
+	pending        *JournalEntry
 	serviceMatcher serviceMatcher
 }
 
 // NewJournalReader creates a journal reader. Only available on Linux.
 func NewJournalReader(cfg JournalConfig) (JournalReader, error) {
-	j, err := openJournal(cfg.JournalNamespace)
-	if err != nil {
-		return nil, fmt.Errorf("open journal: %w", err)
-	}
 	matcher, exactMatch, err := newServiceMatcher(cfg.ServiceMask)
 	if err != nil {
-		j.Close()
 		return nil, err
 	}
-	if exactMatch != "" {
-		if err := j.AddMatch("_SYSTEMD_UNIT=" + exactMatch); err != nil {
-			j.Close()
-			return nil, fmt.Errorf("add match: %w", err)
-		}
+	j, err := openMatchedJournal(cfg.JournalNamespace, exactMatch)
+	if err != nil {
+		return nil, err
 	}
-	return &journalReader{j: j, cfg: cfg, serviceMatcher: matcher}, nil
+	return &journalReader{j: j, cfg: cfg, exactMatch: exactMatch, serviceMatcher: matcher}, nil
 }
 
 func openJournal(namespace string) (*sdjournal.Journal, error) {
@@ -53,12 +49,29 @@ func openJournal(namespace string) (*sdjournal.Journal, error) {
 	return sdjournal.NewJournalInNamespace(namespace)
 }
 
+func openMatchedJournal(namespace, exactMatch string) (*sdjournal.Journal, error) {
+	j, err := openJournal(namespace)
+	if err != nil {
+		return nil, fmt.Errorf("open journal: %w", err)
+	}
+	if exactMatch == "" {
+		return j, nil
+	}
+	if err := j.AddMatch("_SYSTEMD_UNIT=" + exactMatch); err != nil {
+		j.Close()
+		return nil, fmt.Errorf("add match: %w", err)
+	}
+	return j, nil
+}
+
 func (r *journalReader) SeekToPosition(ctx context.Context, position string) error {
 	if position == "" {
 		if err := r.j.SeekHead(); err != nil {
 			return fmt.Errorf("seek head: %w", err)
 		}
 		r.last = ""
+		r.lastRealtime = 0
+		r.pending = nil
 		return nil
 	}
 	if err := r.j.SeekCursor(position); err != nil {
@@ -66,36 +79,128 @@ func (r *journalReader) SeekToPosition(ctx context.Context, position string) err
 	}
 	_, _ = r.j.Next()
 	r.last = position
+	r.pending = nil
 	return nil
 }
 
 func (r *journalReader) Next(ctx context.Context) (*JournalEntry, error) {
+	if r.pending != nil {
+		entry := r.pending
+		r.pending = nil
+		return entry, nil
+	}
+	entry, nextCursor, nextRealtime, err := r.readNext(ctx, r.j, r.last)
+	if err != nil {
+		return nil, err
+	}
+	if entry != nil {
+		r.last = nextCursor
+		r.lastRealtime = nextRealtime
+	}
+	return entry, nil
+}
+
+func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last string) (*JournalEntry, string, uint64, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, "", 0, ctx.Err()
 		default:
 		}
-		n, err := r.j.Next()
+		n, err := j.Next()
 		if err != nil {
-			return nil, err
+			return nil, "", 0, err
 		}
 		if n == 0 {
-			return nil, nil
+			return nil, last, r.lastRealtime, nil
 		}
-		entry, err := r.j.GetEntry()
+		entry, err := j.GetEntry()
 		if err != nil {
-			return nil, fmt.Errorf("get entry: %w", err)
+			return nil, "", 0, fmt.Errorf("get entry: %w", err)
 		}
 		rec := journalEntryToRecord(entry)
 		if !r.serviceMatcher.Match(rec.SystemdUnit) {
 			// Keep continuity relative to last sent record only.
 			continue
 		}
-		positionBefore := r.last
-		r.last = entry.Cursor
-		return &JournalEntry{Record: rec, Position: positionBefore, Cursor: entry.Cursor}, nil
+		nextRealtime := entry.RealtimeTimestamp
+		if rec.RealtimeTimestamp != nil && *rec.RealtimeTimestamp >= 0 {
+			nextRealtime = uint64(*rec.RealtimeTimestamp)
+		}
+		return &JournalEntry{Record: rec, Position: last, Cursor: entry.Cursor}, entry.Cursor, nextRealtime, nil
 	}
+}
+
+func (r *journalReader) Recover(ctx context.Context) (bool, error) {
+	if r.j == nil {
+		return false, fmt.Errorf("journal is not open")
+	}
+	cursorErr := r.recoverFromCursor(ctx)
+	if cursorErr == nil {
+		return true, nil
+	}
+	if r.lastRealtime == 0 {
+		return false, fmt.Errorf("resume from last known cursor failed: %w; no later timestamp is available after the last good entry", cursorErr)
+	}
+	realtimeErr := r.recoverFromRealtime(ctx)
+	if realtimeErr != nil {
+		return false, fmt.Errorf("resume from last known cursor failed: %w; resume after the last good timestamp failed: %w", cursorErr, realtimeErr)
+	}
+	return true, nil
+}
+
+func (r *journalReader) recoverFromCursor(ctx context.Context) error {
+	if r.last == "" {
+		return fmt.Errorf("no last known cursor is available")
+	}
+	j, err := openMatchedJournal(r.cfg.JournalNamespace, r.exactMatch)
+	if err != nil {
+		return err
+	}
+	if err := j.SeekCursor(r.last); err != nil {
+		j.Close()
+		return fmt.Errorf("seek last known cursor %q: %w", r.last, err)
+	}
+	if err := r.swapRecoveredJournal(ctx, j, r.last); err != nil {
+		return fmt.Errorf("resume from last known cursor %q: %w", r.last, err)
+	}
+	return nil
+}
+
+func (r *journalReader) recoverFromRealtime(ctx context.Context) error {
+	j, err := openMatchedJournal(r.cfg.JournalNamespace, r.exactMatch)
+	if err != nil {
+		return err
+	}
+	if err := j.SeekRealtimeUsec(r.lastRealtime + 1); err != nil {
+		j.Close()
+		return fmt.Errorf("seek past last good entry timestamp %d: %w", r.lastRealtime, err)
+	}
+	if err := r.swapRecoveredJournal(ctx, j, r.last); err != nil {
+		return fmt.Errorf("resume after timestamp %d: %w", r.lastRealtime, err)
+	}
+	return nil
+}
+
+func (r *journalReader) swapRecoveredJournal(ctx context.Context, j *sdjournal.Journal, last string) error {
+	entry, nextCursor, nextRealtime, err := r.readNext(ctx, j, last)
+	if err != nil {
+		j.Close()
+		return err
+	}
+	if r.j != nil {
+		if closeErr := r.j.Close(); closeErr != nil {
+			j.Close()
+			return fmt.Errorf("close old journal: %w", closeErr)
+		}
+	}
+	r.j = j
+	r.pending = entry
+	if entry != nil {
+		r.last = nextCursor
+		r.lastRealtime = nextRealtime
+	}
+	return nil
 }
 
 func journalEntryToRecord(e *sdjournal.JournalEntry) models.Record {

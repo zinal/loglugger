@@ -19,6 +19,9 @@ type JournalReader interface {
 	SeekToPosition(ctx context.Context, position string) error
 	// Next reads the next entry. Returns nil when no more entries (would block).
 	Next(ctx context.Context) (*JournalEntry, error)
+	// Recover attempts best-effort recovery after journal corruption. The returned
+	// boolean reports whether the caller should send the next batch with reset=true.
+	Recover(ctx context.Context) (bool, error)
 }
 
 // JournalConfig configures the journal reader.

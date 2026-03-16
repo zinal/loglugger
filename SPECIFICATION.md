@@ -82,6 +82,20 @@ The system implements a **position-tracking protocol** to ensure exactly-once de
   - The server returned `expected_position` due to mismatch and the client cannot resume from that position (e.g., journal history was lost).
   - Configuration change that invalidates position (e.g., filter mask change).
 
+### 4.3.1 Journal Corruption Handling
+
+- **Corruption signal**: If journald iteration returns `EBADMSG` / "bad message", the client treats this as journal corruption rather than a transient transport error.
+- **Default behavior**: By default, the client must log the corruption and stop immediately. The error message should mention that recovery is available via an explicit opt-in configuration switch.
+- **Opt-in recovery**: When `journal_recovery` is enabled, the client may attempt best-effort recovery from corruption. This mode is disabled by default because it may skip records.
+- **Recovery strategy**: A recovery attempt should:
+  - Reopen the journal with the same namespace and exact-match filters.
+  - First try to resume from the last known good cursor.
+  - If that still fails, try to seek to a point just after the timestamp of the last known good entry.
+- **Recovery warning**: When recovery is enabled and corruption is detected, the client must log a warning that some data loss is possible.
+- **Recovery result**:
+  - If recovery succeeds, the client resumes reading and must send the next batch with `reset: true`, because continuity relative to the previous server-side position may have been broken.
+  - If recovery still fails, the client must stop and report that recovery is not possible.
+
 ### 4.4 Message Payload
 
 The client sends raw `message` to the server. Parsing is performed on the server side and is configured via server settings.
@@ -416,6 +430,7 @@ loglugger/
 | server_urls | string/list | — | One or more server base URLs (must use `https://`); list or comma-separated string |
 | client_id | string | hostname | Unique client identifier |
 | service_mask | string | "" | Filter mask for `_SYSTEMD_UNIT` (empty = no filter) |
+| journal_recovery | bool | false | Enable best-effort recovery from journal corruption (`EBADMSG` / "bad message"); may skip records and therefore may lose data |
 | **Message parsing** | | | |
 | batch_size | int | 50000 | Max records per batch (also constrained by the fixed 10 MB uncompressed log-data limit per request) |
 | batch_timeout | duration | 5s | Max time before flushing partial batch |
@@ -526,6 +541,8 @@ Each configured attribute is provided as a list. The certificate subject value m
 | Network partition | Retry with backoff; buffer batches in memory (bounded) | N/A |
 | Server restart | On startup, fetch current position from `GET /v1/positions`; then continue or reset | Position stored on server persists |
 | Journal rotation | If server-provided cursor cannot be used, send reset and restart from head | Accept with reset; update expected position |
+| Journal corruption (`EBADMSG`) with recovery disabled | Log corruption, mention recovery option, and stop | Position stored on server remains unchanged |
+| Journal corruption (`EBADMSG`) with recovery enabled | Warn about possible data loss; try reopen/reseek recovery; on success resume with `reset: true`; on failure stop | Accept next successful recovery batch with reset; otherwise position stored on server remains unchanged |
 | YDB unavailable | Client retries; server returns 5xx | Fail batch; do not update position |
 | Duplicate batch (retry) | Client may retry same batch | Idempotent BulkUpsert; position already updated—reject with 409 if current_position no longer matches |
 

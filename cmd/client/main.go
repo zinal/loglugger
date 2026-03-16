@@ -26,6 +26,7 @@ type clientConfig struct {
 	ClientID         string
 	ServiceMask      string
 	JournalNamespace string
+	JournalRecovery  bool
 	Debug            bool
 	BatchSize        int
 	BatchTimeout     time.Duration
@@ -117,6 +118,17 @@ func main() {
 
 		entry, err := journal.Next(ctx)
 		if err != nil {
+			if isJournalCorruption(err) {
+				recoveredReset, recoveryErr := recoverFromJournalCorruption(ctx, journal, cfg.JournalRecovery)
+				if recoveryErr != nil {
+					slog.Error(recoveryErr.Error(), "error", err)
+					os.Exit(1)
+				}
+				if recoveredReset {
+					reset = true
+				}
+				continue
+			}
 			slog.Error("read journal", "error", err)
 			time.Sleep(100 * time.Millisecond)
 			continue
@@ -152,6 +164,7 @@ func parseClientConfig() clientConfig {
 	flag.StringVar(&cfg.ClientID, "client-id", "", "Client ID (default: hostname)")
 	flag.StringVar(&cfg.ServiceMask, "service-mask", "", "Filter for _SYSTEMD_UNIT")
 	flag.StringVar(&cfg.JournalNamespace, "journal-namespace", "", "journald namespace to read from (empty = default)")
+	flag.BoolVar(&cfg.JournalRecovery, "journal-recovery", false, "Attempt best-effort recovery from corrupted journal entries (may lose data)")
 	flag.IntVar(&cfg.BatchSize, "batch-size", 50000, "Max records per batch")
 	flag.DurationVar(&cfg.BatchTimeout, "batch-timeout", 5*time.Second, "Batch flush timeout")
 	flag.DurationVar(&cfg.HTTPTimeout, "http-timeout", 30*time.Second, "HTTP timeout")
@@ -161,9 +174,27 @@ func parseClientConfig() clientConfig {
 	flag.StringVar(&cfg.TLSKeyFile, "tls-key-file", "", "Client key for mTLS")
 	flag.BoolVar(&cfg.TLSUseSystemPool, "tls-use-system-pool", false, "Use system CA pool")
 	flag.BoolVar(&cfg.Debug, "debug", parseEnvBool("LOGLUGGER_DEBUG", false), "Enable debug logging (or set LOGLUGGER_DEBUG=true)")
-	_ = flag.CommandLine.Parse(normalizeBoolFlagArgs(os.Args[1:], "debug"))
+	args := normalizeBoolFlagArgs(os.Args[1:], "debug")
+	args = normalizeBoolFlagArgs(args, "journal-recovery")
+	_ = flag.CommandLine.Parse(args)
 	cfg.ServerURLs = shuffleServerURLs(parseServerURLs(*serverList))
 	return cfg
+}
+
+func isJournalCorruption(err error) bool {
+	return errors.Is(err, syscall.EBADMSG)
+}
+
+func recoverFromJournalCorruption(ctx context.Context, journal client.JournalReader, enabled bool) (bool, error) {
+	if !enabled {
+		return false, fmt.Errorf("journal corruption detected; stopping. Re-run with -journal-recovery=true to attempt best-effort recovery with possible data loss")
+	}
+	slog.Warn("journal corruption detected; attempting best-effort recovery, some data loss is possible")
+	reset, err := journal.Recover(ctx)
+	if err != nil {
+		return false, fmt.Errorf("journal corruption recovery is not possible; stopping: %w", err)
+	}
+	return reset, nil
 }
 
 func normalizeBoolFlagArgs(args []string, flagName string) []string {
