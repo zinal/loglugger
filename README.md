@@ -16,6 +16,8 @@ sudo apt-get install -y libsystemd-dev  # or your operating system equivalent
 ./build.sh
 ```
 
+This repository vendors a fork of `github.com/coreos/go-systemd/v22` under `third_party/go-systemd` and uses it via a local `replace` in `go.mod`. The fork adds native journald namespace support (`sd_journal_open_namespace`), which is required for reliable reading from non-default namespaces.
+
 The client requires Linux for journald support. On macOS and Windows, the client fails at startup with "journald is only supported on Linux".
 
 After building, use `./bin/loglugger-server` and `./bin/loglugger-client` in the run commands below.

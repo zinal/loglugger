@@ -1,6 +1,6 @@
 module github.com/ydb-platform/loglugger
 
-go 1.23.9
+go 1.24
 
 require (
 	github.com/coreos/go-systemd/v22 v22.5.0
@@ -10,7 +10,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace github.com/coreos/go-systemd/v22 => github.com/zinal/go-systemd v0.0.0-20260316155058-2966061f1d58
+replace github.com/coreos/go-systemd/v22 => ./third_party/go-systemd
 
 require (
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
