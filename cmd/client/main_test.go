@@ -6,6 +6,8 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -215,6 +217,25 @@ func TestParseClientConfigParsesJournalNamespace(t *testing.T) {
 	}
 }
 
+func TestParseClientConfigParsesJournalRecovery(t *testing.T) {
+	prev := flag.CommandLine
+	prevArgs := os.Args
+	defer func() {
+		flag.CommandLine = prev
+		os.Args = prevArgs
+	}()
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+
+	os.Args = []string{
+		"client",
+		"-journal-recovery", "true",
+	}
+	cfg := parseClientConfig()
+	if !cfg.JournalRecovery {
+		t.Fatal("JournalRecovery = false, want true")
+	}
+}
+
 func TestParseClientConfigDebugTrueDoesNotBreakFollowingFlags(t *testing.T) {
 	prev := flag.CommandLine
 	prevArgs := os.Args
@@ -268,6 +289,41 @@ func TestNormalizeBoolFlagArgs(t *testing.T) {
 	}
 }
 
+func TestRecoverFromJournalCorruptionDisabled(t *testing.T) {
+	_, err := recoverFromJournalCorruption(context.Background(), &stubJournalReader{}, false)
+	if err == nil {
+		t.Fatal("expected error when recovery is disabled")
+	}
+	if !strings.Contains(err.Error(), "-journal-recovery=true") {
+		t.Fatalf("error = %q, want recovery option hint", err)
+	}
+}
+
+func TestRecoverFromJournalCorruptionEnabled(t *testing.T) {
+	journal := &stubJournalReader{recoverReset: true}
+	reset, err := recoverFromJournalCorruption(context.Background(), journal, true)
+	if err != nil {
+		t.Fatalf("recoverFromJournalCorruption() error = %v", err)
+	}
+	if !reset {
+		t.Fatal("reset = false, want true")
+	}
+	if journal.recoverCalls != 1 {
+		t.Fatalf("recoverCalls = %d, want 1", journal.recoverCalls)
+	}
+}
+
+func TestRecoverFromJournalCorruptionFailure(t *testing.T) {
+	journal := &stubJournalReader{recoverErr: syscall.EBADMSG}
+	_, err := recoverFromJournalCorruption(context.Background(), journal, true)
+	if err == nil {
+		t.Fatal("expected recovery error")
+	}
+	if !strings.Contains(err.Error(), "recovery is not possible") {
+		t.Fatalf("error = %q, want not possible message", err)
+	}
+}
+
 func sameStringsIgnoringOrder(left, right []string) bool {
 	if len(left) != len(right) {
 		return false
@@ -296,6 +352,9 @@ func (s stubSender) CurrentPosition(ctx context.Context) (*models.PositionRespon
 type stubJournalReader struct {
 	seekCalls     []string
 	failPositions map[string]bool
+	recoverCalls  int
+	recoverReset  bool
+	recoverErr    error
 }
 
 func (r *stubJournalReader) SeekToPosition(ctx context.Context, position string) error {
@@ -308,4 +367,9 @@ func (r *stubJournalReader) SeekToPosition(ctx context.Context, position string)
 
 func (r *stubJournalReader) Next(ctx context.Context) (*client.JournalEntry, error) {
 	return nil, nil
+}
+
+func (r *stubJournalReader) Recover(ctx context.Context) (bool, error) {
+	r.recoverCalls++
+	return r.recoverReset, r.recoverErr
 }

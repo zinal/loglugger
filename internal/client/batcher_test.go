@@ -107,3 +107,31 @@ func TestBatcher_AllowsSingleOversizedRecord(t *testing.T) {
 		t.Fatalf("unexpected batch: %+v", batch)
 	}
 }
+
+func TestBatcher_RecoveryMessageWaitsForRealCursor(t *testing.T) {
+	b := NewBatcher(1, 0).(*batcher)
+
+	b.Add(&JournalEntry{Record: models.Record{Message: "synthetic"}, Position: "p1"})
+	if b.ShouldFlush() {
+		t.Fatal("synthetic recovery record alone must not flush")
+	}
+	if batch := b.Flush(); batch != nil {
+		t.Fatalf("Flush() = %+v, want nil until a real cursor-bearing entry arrives", batch)
+	}
+
+	b.Add(&JournalEntry{Record: models.Record{Message: "real"}, Position: "p1", Cursor: "p2"})
+	if !b.ShouldFlush() {
+		t.Fatal("expected flush once a real cursor-bearing entry is present")
+	}
+
+	batch := b.Flush()
+	if batch == nil {
+		t.Fatal("expected batch with recovery record and first recovered journal record")
+	}
+	if len(batch.Records) != 2 {
+		t.Fatalf("len(batch.Records) = %d, want 2", len(batch.Records))
+	}
+	if batch.CurrentPosition != "p1" || batch.NextPosition != "p2" {
+		t.Fatalf("positions = %q, %q, want p1, p2", batch.CurrentPosition, batch.NextPosition)
+	}
+}
