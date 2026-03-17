@@ -217,7 +217,7 @@ func TestSenderCurrentPositionKeepsEndpointOnSuccess(t *testing.T) {
 	}
 }
 
-func TestSenderCurrentPositionFailsBackToPrimaryAfterRecovery(t *testing.T) {
+func TestSenderCurrentPositionSticksToRecoveredEndpointUntilReshuffle(t *testing.T) {
 	primaryHits := 0
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		primaryHits++
@@ -258,11 +258,68 @@ func TestSenderCurrentPositionFailsBackToPrimaryAfterRecovery(t *testing.T) {
 	if first == nil || first.CurrentPosition != "cursor-secondary" {
 		t.Fatalf("first CurrentPosition() = %+v, want cursor-secondary", first)
 	}
-	if second == nil || second.CurrentPosition != "cursor-primary" {
-		t.Fatalf("second CurrentPosition() = %+v, want cursor-primary", second)
+	if second == nil || second.CurrentPosition != "cursor-secondary" {
+		t.Fatalf("second CurrentPosition() = %+v, want cursor-secondary", second)
 	}
-	if primaryHits != 2 {
-		t.Fatalf("primary hits = %d, want 2", primaryHits)
+	if primaryHits != 1 {
+		t.Fatalf("primary hits = %d, want 1", primaryHits)
+	}
+	if secondaryHits != 2 {
+		t.Fatalf("secondary hits = %d, want 2", secondaryHits)
+	}
+}
+
+func TestSenderReshufflesEndpointsPeriodically(t *testing.T) {
+	primaryHits := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","current_position":"cursor-primary"}`))
+	}))
+	defer primary.Close()
+
+	secondaryHits := 0
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryHits++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","current_position":"cursor-secondary"}`))
+	}))
+	defer secondary.Close()
+
+	raw := NewSender(SenderConfig{
+		ServerURLs:  []string{primary.URL, secondary.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+	s := raw.(*sender)
+	baseNow := time.Now()
+	s.now = func() time.Time { return baseNow }
+	s.nextShuffleAt = baseNow.Add(time.Hour)
+
+	first, err := s.CurrentPosition(context.Background())
+	if err != nil {
+		t.Fatalf("first CurrentPosition() error = %v", err)
+	}
+	if first == nil || first.CurrentPosition != "cursor-primary" {
+		t.Fatalf("first CurrentPosition() = %+v, want cursor-primary", first)
+	}
+
+	s.shuffle = func(n int, swap func(i, j int)) {
+		// Deterministic reshuffle for test: swap first two endpoints.
+		swap(0, 1)
+	}
+	s.nextShuffleAt = baseNow
+
+	second, err := s.CurrentPosition(context.Background())
+	if err != nil {
+		t.Fatalf("second CurrentPosition() error = %v", err)
+	}
+	if second == nil || second.CurrentPosition != "cursor-secondary" {
+		t.Fatalf("second CurrentPosition() = %+v, want cursor-secondary", second)
+	}
+	if primaryHits != 1 {
+		t.Fatalf("primary hits = %d, want 1", primaryHits)
 	}
 	if secondaryHits != 1 {
 		t.Fatalf("secondary hits = %d, want 1", secondaryHits)

@@ -1,4 +1,9 @@
 server_url: "https://localhost:27312"
+# Optional list form for multiple endpoints. Both `server_url` and `server_urls`
+# are supported; comma-separated values in `server_url` are also accepted.
+#server_urls:
+  # - "https://localhost:27312"
+  # - "https://localhost:27313"
 client_id: "myhost"
 service_mask: ""
 journal_namespace: ""

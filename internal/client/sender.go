@@ -9,10 +9,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/ydb-platform/loglugger/internal/models"
@@ -25,13 +26,22 @@ type Sender interface {
 }
 
 type sender struct {
-	endpoints  []senderEndpoint
-	clientID   string
-	retryDelay time.Duration
-	nextIndex  uint64
+	mu            sync.Mutex
+	endpoints     []senderEndpoint
+	clientID      string
+	retryDelay    time.Duration
+	nextIndex     int
+	rng           *rand.Rand
+	shuffle       func(n int, swap func(i, j int))
+	now           func() time.Time
+	nextShuffleAt time.Time
 }
 
 const maxRetryBackoff = time.Minute
+const (
+	minShuffleInterval = 30 * time.Minute
+	maxShuffleInterval = 60 * time.Minute
+)
 
 type senderEndpoint struct {
 	client      *http.Client
@@ -78,11 +88,17 @@ func NewSender(cfg SenderConfig) Sender {
 			positionURL: baseURL + "/v1/positions",
 		})
 	}
-	return &sender{
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	s := &sender{
 		endpoints:  endpoints,
 		clientID:   cfg.ClientID,
 		retryDelay: cfg.RetryDelay,
+		rng:        rng,
+		shuffle:    rng.Shuffle,
+		now:        time.Now,
 	}
+	s.scheduleNextShuffleLocked()
+	return s
 }
 
 func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.BatchResponse, error) {
@@ -244,7 +260,10 @@ func retryDelayForAttempt(baseDelay time.Duration, attempt int) time.Duration {
 }
 
 func (s *sender) currentEndpoint() (senderEndpoint, int) {
-	idx := int(atomic.LoadUint64(&s.nextIndex)) % len(s.endpoints)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reshuffleIfDueLocked()
+	idx := s.nextIndex % len(s.endpoints)
 	return s.endpoints[idx], idx
 }
 
@@ -252,17 +271,54 @@ func (s *sender) advanceStartIndexOnFailure(failedIndex int) {
 	if len(s.endpoints) == 0 {
 		return
 	}
-	next := uint64((failedIndex + 1) % len(s.endpoints))
-	atomic.StoreUint64(&s.nextIndex, next)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextIndex = (failedIndex + 1) % len(s.endpoints)
 }
 
 func (s *sender) markSuccess(successIndex int) {
-	// Re-prefer the first configured endpoint after any successful call.
-	// This allows automatic failback once the primary endpoint recovers.
-	if successIndex == 0 {
+	if len(s.endpoints) == 0 {
 		return
 	}
-	atomic.StoreUint64(&s.nextIndex, 0)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if successIndex < 0 || successIndex >= len(s.endpoints) {
+		s.nextIndex = 0
+		return
+	}
+	if successIndex != 0 {
+		// Keep future requests on the healthy endpoint by promoting it to slot 0.
+		s.endpoints[0], s.endpoints[successIndex] = s.endpoints[successIndex], s.endpoints[0]
+	}
+	s.nextIndex = 0
+}
+
+func (s *sender) reshuffleIfDueLocked() {
+	if len(s.endpoints) < 2 {
+		return
+	}
+	now := s.now()
+	if now.Before(s.nextShuffleAt) {
+		return
+	}
+	s.shuffle(len(s.endpoints), func(i, j int) {
+		s.endpoints[i], s.endpoints[j] = s.endpoints[j], s.endpoints[i]
+	})
+	s.nextIndex = 0
+	s.scheduleNextShuffleLocked()
+}
+
+func (s *sender) scheduleNextShuffleLocked() {
+	if len(s.endpoints) < 2 {
+		s.nextShuffleAt = time.Time{}
+		return
+	}
+	delta := maxShuffleInterval - minShuffleInterval
+	if delta <= 0 {
+		s.nextShuffleAt = s.now().Add(minShuffleInterval)
+		return
+	}
+	s.nextShuffleAt = s.now().Add(minShuffleInterval + time.Duration(s.rng.Int63n(int64(delta))))
 }
 
 func (s *sender) logCompletedRetryCycle(operation string, attempts int) {
