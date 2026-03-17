@@ -28,7 +28,6 @@ type tableSchema struct {
 }
 
 var (
-	ydbOpen               = ydb.Open
 	defaultYDBOpenTimeout = 10 * time.Second
 )
 
@@ -295,17 +294,17 @@ func (w *YDBWriter) getTableSchema(ctx context.Context, tableName string) (table
 
 func openYDBDriver(ctx context.Context, endpoint, database string, auth YDBAuthOptions, openTimeout time.Duration) (*ydb.Driver, error) {
 	if endpoint == "" {
-		return nil, fmt.Errorf("ydb endpoint is required")
+		return nil, fmt.Errorf("ydb endpoint setting is required")
 	}
 	if database == "" {
-		return nil, fmt.Errorf("ydb database is required")
+		return nil, fmt.Errorf("ydb database setting is required")
 	}
+	dsn := fmt.Sprintf("%s/%s", endpoint, database)
 	authOption, err := ydbAuthOption(auth)
 	if err != nil {
 		return nil, err
 	}
 	opts := []ydb.Option{
-		ydb.WithDatabase(database),
 		authOption,
 	}
 	if caPath := strings.TrimSpace(auth.CACertPath); caPath != "" {
@@ -324,7 +323,7 @@ func openYDBDriver(ctx context.Context, endpoint, database string, auth YDBAuthO
 	}
 	defer cancel()
 
-	driver, err := ydbOpen(openCtx, endpoint, opts...)
+	driver, err := ydb.Open(openCtx, dsn, opts...)
 	if err != nil {
 		if appliedDefaultTimeout && errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("open ydb connection timed out after %s: %w", effectiveOpenTimeout, err)
