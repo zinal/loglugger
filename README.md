@@ -42,24 +42,20 @@ Server configuration:
 
 **Client** (Linux only):
 ```bash
-./bin/loglugger-client \
-  -server https://localhost:27312 \
-  -client-id myhost \
-  -tls-ca-file certs/ca.crt \
-  -tls-cert-file certs/client.crt \
-  -tls-key-file certs/client.key
+./bin/loglugger-client -config examples/config/client.yaml
 ```
 
-Useful client flags:
+Client configuration:
 
-- `-service-mask nginx.service` uses exact systemd unit matching.
-- `-service-mask 'nginx*.service'` uses glob matching.
-- `-service-mask 'regex:^nginx-(api|worker)\\.service$'` uses regex matching.
-- `-journal-namespace my_namespace` reads logs from a non-default journald namespace.
-- `-journal-recovery=true` enables best-effort recovery after journal corruption (`EBADMSG` / `bad message`). This mode is off by default because it may skip corrupted regions and therefore lose some data. Without it, the client logs the corruption and stops immediately.
-- `-debug` enables verbose client diagnostics (disabled by default); alternatively set `LOGLUGGER_DEBUG=true`.
-- `-server https://a:27312,https://b:27312` configures multiple endpoints; the client keeps using the current endpoint while requests succeed and switches to the next one only after a transient failure (`5xx` or network error).
-- `-tls-ca-file` and `-tls-use-system-pool` control the client trust store.
+- Most client settings are loaded from a YAML/JSON file passed with `-config`.
+- See `examples/config/client.yaml` for all supported keys.
+- `service_mask: nginx.service` uses exact systemd unit matching.
+- `service_mask: "nginx*.service"` uses glob matching.
+- `service_mask: "regex:^nginx-(api|worker)\\.service$"` uses regex matching.
+- `message_regex`, `systemd_unit_regex`, and `message_regex_no_match` configure client-side parsing before records are sent to the server.
+- `journal_recovery: true` enables best-effort recovery after journal corruption (`EBADMSG` / `bad message`). This mode is off by default because it may skip corrupted regions and therefore lose some data. Without it, the client logs the corruption and stops immediately.
+- `server_url` / `server_urls` configure one or more endpoints; the client keeps using the current endpoint while requests succeed and switches to the next one only after a transient failure (`5xx` or network error).
+- `tls_ca_file` and `tls_use_system_pool` control the client trust store.
 - Client batches are additionally limited to 10 MB of uncompressed log data per request.
 - If a single record exceeds 10 MB, it is sent as a single-record request and is not dropped.
 - Every outgoing record includes `seqno`: a monotonically increasing client-side sequence number. The first value equals client startup time in milliseconds since Unix epoch.
@@ -124,12 +120,7 @@ For a local end-to-end run with the mock backend:
 ```
 
 ```bash
-./bin/loglugger-client \
-  -server https://localhost:27312 \
-  -client-id myhost \
-  -tls-ca-file certs/ca.crt \
-  -tls-cert-file certs/client.crt \
-  -tls-key-file certs/client.key
+./bin/loglugger-client -config examples/config/client.yaml
 ```
 
 ## Tests
@@ -188,5 +179,5 @@ Notes on YDB schema and mapping:
 - `convert_time_to_local_tz` (server config, default `false`) changes how timezone-less `timestamp64` values are parsed:
   - `false`: interpret as UTC
   - `true`: interpret in the OS local timezone before saving (useful, but risky when timezone configuration differs across hosts)
-- `message_regex`, `systemd_unit_regex`, and `message_regex_no_match` are configured on the server in YAML/JSON configuration.
+- `message_regex`, `systemd_unit_regex`, and `message_regex_no_match` are configured on the client in YAML/JSON configuration.
 - Named groups from both regexes are merged into the same `parsed.*` namespace and can be used by field mapping.

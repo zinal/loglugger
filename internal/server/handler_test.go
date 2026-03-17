@@ -181,17 +181,19 @@ func TestHandler_FieldMappingParsed(t *testing.T) {
 		{Source: "client_id", Destination: "client_id"},
 	})
 	writer := NewMockWriter()
-	parser, err := NewMessageParser(`^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$`, NoMatchSendRaw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := NewHandlerWithParser(mapper, writer, "logs", parser)
+	handler := NewHandler(mapper, writer, "logs")
 
 	req := &models.BatchRequest{
 		ClientID: "host-01", Reset: true, NextPosition: "p1",
 		Records: []models.Record{
 			{
 				Message: "2025-03-13T10:00:00 :nginx INFO: Server started",
+				Parsed: map[string]string{
+					"P_DTTM":    "2025-03-13T10:00:00",
+					"P_SERVICE": "nginx",
+					"P_LEVEL":   "INFO",
+					"P_MESSAGE": "Server started",
+				},
 			},
 		},
 	}
@@ -484,7 +486,6 @@ func TestHandler_RejectsTooLargeIdentityBody(t *testing.T) {
 		NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}),
 		NewMockWriter(),
 		"logs",
-		nil,
 		HandlerOptions{
 			MaxCompressedBodyBytes:   128,
 			MaxDecompressedBodyBytes: 1024,
@@ -515,7 +516,6 @@ func TestHandler_RejectsTooLargeGzipDecodedBody(t *testing.T) {
 		NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}),
 		NewMockWriter(),
 		"logs",
-		nil,
 		HandlerOptions{
 			MaxCompressedBodyBytes:   1 << 20,
 			MaxDecompressedBodyBytes: 256,

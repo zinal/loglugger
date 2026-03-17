@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -187,11 +188,16 @@ func TestParseClientConfigParsesServerList(t *testing.T) {
 	}()
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 
-	os.Args = []string{
-		"client",
-		"-server", "https://a:27312,https://b:27312",
+	configPath := writeTempClientConfig(t, `
+server_urls:
+  - https://a:27312
+  - https://b:27312
+`)
+	os.Args = []string{"client", "-config", configPath}
+	cfg, err := parseClientConfig()
+	if err != nil {
+		t.Fatalf("parseClientConfig() error = %v", err)
 	}
-	cfg := parseClientConfig()
 	want := []string{"https://a:27312", "https://b:27312"}
 	if !sameStringsIgnoringOrder(cfg.ServerURLs, want) {
 		t.Fatalf("ServerURLs = %v, want %v", cfg.ServerURLs, want)
@@ -207,11 +213,12 @@ func TestParseClientConfigParsesJournalNamespace(t *testing.T) {
 	}()
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 
-	os.Args = []string{
-		"client",
-		"-journal-namespace", "my_namespace",
+	configPath := writeTempClientConfig(t, "server_url: https://localhost:27312\njournal_namespace: my_namespace\n")
+	os.Args = []string{"client", "-config", configPath}
+	cfg, err := parseClientConfig()
+	if err != nil {
+		t.Fatalf("parseClientConfig() error = %v", err)
 	}
-	cfg := parseClientConfig()
 	if cfg.JournalNamespace != "my_namespace" {
 		t.Fatalf("JournalNamespace = %q, want my_namespace", cfg.JournalNamespace)
 	}
@@ -226,17 +233,18 @@ func TestParseClientConfigParsesJournalRecovery(t *testing.T) {
 	}()
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 
-	os.Args = []string{
-		"client",
-		"-journal-recovery", "true",
+	configPath := writeTempClientConfig(t, "server_url: https://localhost:27312\njournal_recovery: true\n")
+	os.Args = []string{"client", "-config", configPath}
+	cfg, err := parseClientConfig()
+	if err != nil {
+		t.Fatalf("parseClientConfig() error = %v", err)
 	}
-	cfg := parseClientConfig()
 	if !cfg.JournalRecovery {
 		t.Fatal("JournalRecovery = false, want true")
 	}
 }
 
-func TestParseClientConfigDebugTrueDoesNotBreakFollowingFlags(t *testing.T) {
+func TestParseClientConfigLoadsDurationsAndBatchSize(t *testing.T) {
 	prev := flag.CommandLine
 	prevArgs := os.Args
 	defer func() {
@@ -245,18 +253,25 @@ func TestParseClientConfigDebugTrueDoesNotBreakFollowingFlags(t *testing.T) {
 	}()
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 
-	os.Args = []string{
-		"client",
-		"-debug", "true",
-		"-server", "https://a:27312,https://b:27312",
-		"-batch-size", "123",
+	configPath := writeTempClientConfig(t, `
+server_url: https://a:27312,https://b:27312
+debug: true
+batch_size: 123
+batch_timeout: 7s
+`)
+	os.Args = []string{"client", "-config", configPath}
+	cfg, err := parseClientConfig()
+	if err != nil {
+		t.Fatalf("parseClientConfig() error = %v", err)
 	}
-	cfg := parseClientConfig()
 	if !cfg.Debug {
 		t.Fatal("Debug = false, want true")
 	}
 	if cfg.BatchSize != 123 {
 		t.Fatalf("BatchSize = %d, want 123", cfg.BatchSize)
+	}
+	if cfg.BatchTimeout != 7*time.Second {
+		t.Fatalf("BatchTimeout = %v, want 7s", cfg.BatchTimeout)
 	}
 	want := []string{"https://a:27312", "https://b:27312"}
 	if !sameStringsIgnoringOrder(cfg.ServerURLs, want) {
@@ -281,12 +296,23 @@ func TestShuffleServerURLsWith(t *testing.T) {
 	}
 }
 
-func TestNormalizeBoolFlagArgs(t *testing.T) {
-	got := normalizeBoolFlagArgs([]string{"-debug", "true", "-server", "https://a:27312"}, "debug")
-	want := []string{"-debug=true", "-server", "https://a:27312"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("normalizeBoolFlagArgs() = %v, want %v", got, want)
+func TestBuildRecordParserRejectsInvalidNoMatchAction(t *testing.T) {
+	_, err := buildRecordParser(clientConfig{
+		MessageRegex:   `^(?P<P_LEVEL>[A-Z]+): (?P<P_MESSAGE>.*)$`,
+		MessageNoMatch: "drop",
+	})
+	if err == nil {
+		t.Fatal("expected invalid no-match action error")
 	}
+}
+
+func writeTempClientConfig(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "client.yaml")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+	return path
 }
 
 func TestRecoverFromJournalCorruptionDisabled(t *testing.T) {

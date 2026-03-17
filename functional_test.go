@@ -24,11 +24,7 @@ func TestFunctional_ClientServerFlow(t *testing.T) {
 		{Source: "client_id", Destination: "client_id"},
 	})
 	writer := server.NewMockWriter()
-	parser, err := server.NewMessageParser(`^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$`, server.NoMatchSendRaw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := server.NewHandlerWithParser(mapper, writer, "logs", parser)
+	handler := server.NewHandler(mapper, writer, "logs")
 
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
@@ -42,7 +38,15 @@ func TestFunctional_ClientServerFlow(t *testing.T) {
 		NextPosition: "cursor-001",
 		Records: []models.Record{
 			{Message: "raw log line"},
-			{Message: "2025-03-13T10:00:00 :nginx INFO: Server started"},
+			{
+				Message: "2025-03-13T10:00:00 :nginx INFO: Server started",
+				Parsed: map[string]string{
+					"P_DTTM":    "2025-03-13T10:00:00",
+					"P_SERVICE": "nginx",
+					"P_LEVEL":   "INFO",
+					"P_MESSAGE": "Server started",
+				},
+			},
 		},
 	}
 	body1, _ := json.Marshal(req1)

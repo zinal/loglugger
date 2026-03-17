@@ -1,4 +1,4 @@
-package server
+package client
 
 import (
 	"regexp"
@@ -6,7 +6,7 @@ import (
 	"github.com/ydb-platform/loglugger/internal/models"
 )
 
-// NoMatchAction defines behavior when regex does not match.
+// NoMatchAction defines behavior when message regex does not match.
 type NoMatchAction string
 
 const (
@@ -14,7 +14,7 @@ const (
 	NoMatchSkip    NoMatchAction = "skip"
 )
 
-// MessageParser parses the MESSAGE field with a regex and extracts named groups.
+// MessageParser parses record fields using regexes and extracts named groups.
 type MessageParser interface {
 	Parse(rec models.Record) (models.Record, bool)
 }
@@ -25,11 +25,6 @@ type messageParser struct {
 	systemdUnitRe         *regexp.Regexp
 	systemdUnitGroupNames []string
 	noMatch               NoMatchAction
-}
-
-// NewMessageParser creates a message parser. If regexStr is empty, returns nil (no parsing).
-func NewMessageParser(regexStr string, noMatch NoMatchAction) (MessageParser, error) {
-	return NewRecordParser(regexStr, noMatch, "")
 }
 
 // NewRecordParser creates a parser for optional message/systemd unit regex extraction.

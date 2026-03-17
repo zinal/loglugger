@@ -1,4 +1,4 @@
-package server
+package client
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 	"github.com/ydb-platform/loglugger/internal/models"
 )
 
-func TestRecordParser_MessageAndSystemdUnit(t *testing.T) {
+func TestRecordParserMessageAndSystemdUnit(t *testing.T) {
 	parser, err := NewRecordParser(
 		`^(?P<P_LEVEL>[A-Z]+): (?P<P_MESSAGE>.*)$`,
 		NoMatchSendRaw,
@@ -38,7 +38,7 @@ func TestRecordParser_MessageAndSystemdUnit(t *testing.T) {
 	}
 }
 
-func TestRecordParser_OnlySystemdUnitRegex(t *testing.T) {
+func TestRecordParserOnlySystemdUnitRegex(t *testing.T) {
 	parser, err := NewRecordParser("", NoMatchSendRaw, `^(?P<P_UNIT>[^.]+)\.service$`)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestRecordParser_OnlySystemdUnitRegex(t *testing.T) {
 	}
 }
 
-func TestRecordParser_MessageNoMatchSkip(t *testing.T) {
+func TestRecordParserMessageNoMatchSkip(t *testing.T) {
 	parser, err := NewRecordParser(
 		`^(?P<P_NUM>\d+)$`,
 		NoMatchSkip,
@@ -80,7 +80,7 @@ func TestRecordParser_MessageNoMatchSkip(t *testing.T) {
 	}
 }
 
-func TestRecordParser_MessageNoMatchSendRawStillParsesSystemdUnit(t *testing.T) {
+func TestRecordParserMessageNoMatchSendRawStillParsesSystemdUnit(t *testing.T) {
 	parser, err := NewRecordParser(
 		`^(?P<P_NUM>\d+)$`,
 		NoMatchSendRaw,
@@ -106,7 +106,7 @@ func TestRecordParser_MessageNoMatchSendRawStillParsesSystemdUnit(t *testing.T) 
 	}
 }
 
-func TestRecordParser_EmptyRegexes(t *testing.T) {
+func TestRecordParserEmptyRegexes(t *testing.T) {
 	parser, err := NewRecordParser("", NoMatchSendRaw, "")
 	if err != nil {
 		t.Fatal(err)

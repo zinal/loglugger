@@ -19,7 +19,6 @@ import (
 type Handler struct {
 	mapper                   Mapper
 	writer                   Writer
-	parser                   MessageParser
 	table                    string
 	maxCompressedBodyBytes   int64
 	maxDecompressedBodyBytes int64
@@ -41,21 +40,15 @@ type HandlerOptions struct {
 
 // NewHandler creates a batch handler.
 func NewHandler(mapper Mapper, writer Writer, table string) *Handler {
-	return NewHandlerWithParser(mapper, writer, table, nil)
+	return NewHandlerWithOptions(mapper, writer, table, HandlerOptions{})
 }
 
-// NewHandlerWithParser creates a batch handler with optional server-side message parser.
-func NewHandlerWithParser(mapper Mapper, writer Writer, table string, parser MessageParser) *Handler {
-	return NewHandlerWithOptions(mapper, writer, table, parser, HandlerOptions{})
-}
-
-// NewHandlerWithOptions creates a batch handler with optional parser and request size limits.
-func NewHandlerWithOptions(mapper Mapper, writer Writer, table string, parser MessageParser, opts HandlerOptions) *Handler {
+// NewHandlerWithOptions creates a batch handler with request size limits.
+func NewHandlerWithOptions(mapper Mapper, writer Writer, table string, opts HandlerOptions) *Handler {
 	opts = normalizeHandlerOptions(opts)
 	return &Handler{
 		mapper:                   mapper,
 		writer:                   writer,
-		parser:                   parser,
 		table:                    table,
 		maxCompressedBodyBytes:   opts.MaxCompressedBodyBytes,
 		maxDecompressedBodyBytes: opts.MaxDecompressedBodyBytes,
@@ -275,13 +268,6 @@ func validateRecord(rec models.Record) error {
 func (h *Handler) mapRecords(clientID string, records []models.Record) ([]map[string]interface{}, error) {
 	rows := make([]map[string]interface{}, 0, len(records))
 	for _, rec := range records {
-		if h.parser != nil {
-			parsed, ok := h.parser.Parse(rec)
-			if !ok {
-				continue
-			}
-			rec = parsed
-		}
 		row, err := h.mapper.MapRecord(clientID, rec)
 		if err != nil {
 			return nil, err

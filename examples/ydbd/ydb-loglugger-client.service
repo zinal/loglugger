@@ -9,15 +9,7 @@ User=root
 Group=root
 EnvironmentFile=-/etc/default/ydb-loglugger-client
 ExecStart=/opt/ydb/loglugger/bin/loglugger-client \
-  -server ${LOGLUGGER_SERVER_URL} \
-  -service-mask ${LOGLUGGER_SERVICE_MASK} \
-  -batch-size ${LOGLUGGER_BATCH_SIZE} \
-  -batch-timeout ${LOGLUGGER_BATCH_TIMEOUT} \
-  -http-timeout ${LOGLUGGER_HTTP_TIMEOUT} \
-  -retry-delay ${LOGLUGGER_RETRY_DELAY} \
-  -tls-ca-file ${LOGLUGGER_TLS_CA_FILE} \
-  -tls-cert-file ${LOGLUGGER_TLS_CERT_FILE} \
-  -tls-key-file ${LOGLUGGER_TLS_KEY_FILE}
+  -config ${LOGLUGGER_CLIENT_CONFIG}
 Restart=always
 RestartSec=5s
 LimitNOFILE=65536

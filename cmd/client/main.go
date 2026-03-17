@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,7 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -19,27 +20,36 @@ import (
 	"github.com/ydb-platform/loglugger/internal/buildinfo"
 	"github.com/ydb-platform/loglugger/internal/client"
 	"github.com/ydb-platform/loglugger/internal/models"
+	"gopkg.in/yaml.v3"
 )
 
 type clientConfig struct {
-	ServerURLs       []string
-	ClientID         string
-	ServiceMask      string
-	JournalNamespace string
-	JournalRecovery  bool
-	Debug            bool
-	BatchSize        int
-	BatchTimeout     time.Duration
-	HTTPTimeout      time.Duration
-	RetryDelay       time.Duration
-	TLSCAFile        string
-	TLSCertFile      string
-	TLSKeyFile       string
-	TLSUseSystemPool bool
+	ServerURL        string        `json:"server_url" yaml:"server_url"`
+	ServerURLs       []string      `json:"server_urls" yaml:"server_urls"`
+	ClientID         string        `json:"client_id" yaml:"client_id"`
+	ServiceMask      string        `json:"service_mask" yaml:"service_mask"`
+	JournalNamespace string        `json:"journal_namespace" yaml:"journal_namespace"`
+	JournalRecovery  bool          `json:"journal_recovery" yaml:"journal_recovery"`
+	MessageRegex     string        `json:"message_regex" yaml:"message_regex"`
+	SystemdUnitRegex string        `json:"systemd_unit_regex" yaml:"systemd_unit_regex"`
+	MessageNoMatch   string        `json:"message_regex_no_match" yaml:"message_regex_no_match"`
+	Debug            bool          `json:"debug" yaml:"debug"`
+	BatchSize        int           `json:"batch_size" yaml:"batch_size"`
+	BatchTimeout     time.Duration `json:"batch_timeout" yaml:"batch_timeout"`
+	HTTPTimeout      time.Duration `json:"http_timeout" yaml:"http_timeout"`
+	RetryDelay       time.Duration `json:"retry_delay" yaml:"retry_delay"`
+	TLSCAFile        string        `json:"tls_ca_file" yaml:"tls_ca_file"`
+	TLSCertFile      string        `json:"tls_cert_file" yaml:"tls_cert_file"`
+	TLSKeyFile       string        `json:"tls_key_file" yaml:"tls_key_file"`
+	TLSUseSystemPool bool          `json:"tls_use_system_pool" yaml:"tls_use_system_pool"`
 }
 
 func main() {
-	cfg := parseClientConfig()
+	cfg, err := parseClientConfig()
+	if err != nil {
+		slog.Error("parse client config", "error", err)
+		os.Exit(1)
+	}
 	setupClientLogger(cfg.Debug)
 	slog.Debug("startup server order after shuffle", "shuffled_servers", strings.Join(cfg.ServerURLs, ","))
 
@@ -78,6 +88,11 @@ func main() {
 		RetryDelay:  cfg.RetryDelay,
 		TLSConfig:   tlsConfig,
 	})
+	parser, err := buildRecordParser(cfg)
+	if err != nil {
+		slog.Error("create client parser", "error", err)
+		os.Exit(1)
+	}
 
 	ctx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
@@ -147,8 +162,17 @@ func main() {
 			emptyReads = 0
 		}
 
+		record := entry.Record
+		if parser != nil {
+			parsedRecord, ok := parser.Parse(record)
+			if !ok {
+				continue
+			}
+			record = parsedRecord
+		}
 		seqno := seqnoGenerator.Next()
-		entry.Record.SeqNo = &seqno
+		record.SeqNo = &seqno
+		entry.Record = record
 		batcher.Add(entry)
 		slog.Debug("journal entry received", "systemd_unit", entry.Record.SystemdUnit, "cursor", entry.Cursor, "position", entry.Position)
 
@@ -161,27 +185,22 @@ func main() {
 	}
 }
 
-func parseClientConfig() clientConfig {
-	cfg := clientConfig{}
-	serverList := flag.String("server", "https://localhost:27312", "Server URL or comma-separated server URLs")
-	flag.StringVar(&cfg.ClientID, "client-id", "", "Client ID (default: hostname)")
-	flag.StringVar(&cfg.ServiceMask, "service-mask", "", "Filter for _SYSTEMD_UNIT")
-	flag.StringVar(&cfg.JournalNamespace, "journal-namespace", "", "journald namespace to read from (empty = default)")
-	flag.BoolVar(&cfg.JournalRecovery, "journal-recovery", false, "Attempt best-effort recovery from corrupted journal entries (may lose data)")
-	flag.IntVar(&cfg.BatchSize, "batch-size", 50000, "Max records per batch")
-	flag.DurationVar(&cfg.BatchTimeout, "batch-timeout", 5*time.Second, "Batch flush timeout")
-	flag.DurationVar(&cfg.HTTPTimeout, "http-timeout", 30*time.Second, "HTTP timeout")
-	flag.DurationVar(&cfg.RetryDelay, "retry-delay", time.Second, "Base retry delay")
-	flag.StringVar(&cfg.TLSCAFile, "tls-ca-file", "", "CA cert file for server verification")
-	flag.StringVar(&cfg.TLSCertFile, "tls-cert-file", "", "Client cert for mTLS")
-	flag.StringVar(&cfg.TLSKeyFile, "tls-key-file", "", "Client key for mTLS")
-	flag.BoolVar(&cfg.TLSUseSystemPool, "tls-use-system-pool", false, "Use system CA pool")
-	flag.BoolVar(&cfg.Debug, "debug", parseEnvBool("LOGLUGGER_DEBUG", false), "Enable debug logging (or set LOGLUGGER_DEBUG=true)")
-	args := normalizeBoolFlagArgs(os.Args[1:], "debug")
-	args = normalizeBoolFlagArgs(args, "journal-recovery")
-	_ = flag.CommandLine.Parse(args)
-	cfg.ServerURLs = shuffleServerURLs(parseServerURLs(*serverList))
-	return cfg
+func parseClientConfig() (clientConfig, error) {
+	configPath := flag.String("config", "", "Path to client YAML/JSON config file")
+	flag.Parse()
+	if strings.TrimSpace(*configPath) == "" {
+		return clientConfig{}, fmt.Errorf("config file is required (-config)")
+	}
+	cfg := defaultClientConfig()
+	if err := loadClientConfigFile(*configPath, &cfg); err != nil {
+		return clientConfig{}, err
+	}
+	cfg.ServerURLs = normalizeConfiguredServerURLs(cfg.ServerURLs, cfg.ServerURL)
+	if len(cfg.ServerURLs) == 0 {
+		return clientConfig{}, fmt.Errorf("at least one server URL is required (server_url/server_urls)")
+	}
+	cfg.ServerURLs = shuffleServerURLs(cfg.ServerURLs)
+	return cfg, nil
 }
 
 func isJournalCorruption(err error) bool {
@@ -200,30 +219,6 @@ func recoverFromJournalCorruption(ctx context.Context, journal client.JournalRea
 	return reset, nil
 }
 
-func normalizeBoolFlagArgs(args []string, flagName string) []string {
-	if len(args) == 0 {
-		return nil
-	}
-	shortName := "-" + flagName
-	longName := "--" + flagName
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		current := args[i]
-		if current == shortName || current == longName {
-			if i+1 < len(args) {
-				next := strings.TrimSpace(args[i+1])
-				if _, err := strconv.ParseBool(next); err == nil {
-					out = append(out, current+"="+next)
-					i++
-					continue
-				}
-			}
-		}
-		out = append(out, current)
-	}
-	return out
-}
-
 func setupClientLogger(debug bool) {
 	level := slog.LevelInfo
 	if debug {
@@ -235,17 +230,52 @@ func setupClientLogger(debug bool) {
 	slog.SetDefault(slog.New(handler))
 }
 
-func parseEnvBool(name string, defaultValue bool) bool {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return defaultValue
+func defaultClientConfig() clientConfig {
+	return clientConfig{
+		BatchSize:      50000,
+		BatchTimeout:   5 * time.Second,
+		HTTPTimeout:    30 * time.Second,
+		RetryDelay:     time.Second,
+		MessageNoMatch: string(client.NoMatchSendRaw),
 	}
-	value, err := strconv.ParseBool(raw)
+}
+
+func loadClientConfigFile(path string, cfg *clientConfig) error {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		slog.Warn("invalid boolean env value, using default", "name", name, "value", raw, "default", defaultValue)
-		return defaultValue
+		return fmt.Errorf("read config file: %w", err)
 	}
-	return value
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".json":
+		if err := json.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("decode JSON config file: %w", err)
+		}
+	default:
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("decode YAML config file: %w", err)
+		}
+	}
+	return nil
+}
+
+func normalizeConfiguredServerURLs(serverURLs []string, serverURL string) []string {
+	out := make([]string, 0, len(serverURLs)+1)
+	for _, raw := range serverURLs {
+		out = append(out, parseServerURLs(raw)...)
+	}
+	out = append(out, parseServerURLs(serverURL)...)
+	return out
+}
+
+func buildRecordParser(cfg clientConfig) (client.MessageParser, error) {
+	action := client.NoMatchAction(strings.TrimSpace(cfg.MessageNoMatch))
+	if action == "" {
+		action = client.NoMatchSendRaw
+	}
+	if action != client.NoMatchSendRaw && action != client.NoMatchSkip {
+		return nil, fmt.Errorf("message_regex_no_match must be send_raw or skip")
+	}
+	return client.NewRecordParser(strings.TrimSpace(cfg.MessageRegex), action, strings.TrimSpace(cfg.SystemdUnitRegex))
 }
 
 func buildClientTLSConfig(cfg clientConfig) (*tls.Config, error) {

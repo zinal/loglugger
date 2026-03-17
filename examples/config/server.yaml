@@ -2,11 +2,6 @@ listen_addr: ":27312"
 writer_backend: "mock"
 position_table: "loglugger_positions"
 field_mapping_file: "examples/mappings/basic.yaml"
-# Optional server-side MESSAGE parser.
-message_regex: '^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$'
-# Optional server-side _SYSTEMD_UNIT parser (named groups go to parsed.* too).
-# systemd_unit_regex: '^(?P<P_UNIT_NAME>[^@]+)@(?P<P_UNIT_SHARD>[^.]+)\.service$'
-# message_regex_no_match: "send_raw" # send_raw|skip
 # Parse timezone-less timestamps using OS local timezone before saving.
 # Useful for local-time log formats, but dangerous if hosts/timezones are inconsistent.
 # convert_time_to_local_tz: true

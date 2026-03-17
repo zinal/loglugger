@@ -3,10 +3,10 @@ package models
 import "strconv"
 
 // Record represents a log record sent from client to server.
-// Parsed fields are server-side enrichment and are not part of the wire protocol.
+// Parsed fields are produced by the client parser and sent over protocol.
 type Record struct {
 	Message            string            `json:"message,omitempty"`
-	Parsed             map[string]string `json:"-"`
+	Parsed             map[string]string `json:"parsed,omitempty"`
 	SeqNo              *int64            `json:"seqno,omitempty"`
 	Priority           *int              `json:"priority,omitempty"`
 	SyslogIdentifier   string            `json:"syslog_identifier,omitempty"`
