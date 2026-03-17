@@ -4,6 +4,8 @@ package client
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -230,19 +232,15 @@ func newRecoveryJournalEntry(position string, realtimeUsec uint64) *JournalEntry
 		eventRealtime += 1000
 	}
 	message := recoveryLogMessage(eventRealtime)
-	if message == "" {
-		message = ":LOGLUGGER CRITICAL: " + recoveryMessageText
-	}
+	seqno := recoverySeqNo(eventRealtime)
+	syslogID := randomUUIDLikeID()
 	record := models.Record{
 		Message:          message,
+		SeqNo:            &seqno,
 		Priority:         intPtr(criticalPriority),
-		SyslogIdentifier: "LOGLUGGER",
+		SyslogIdentifier: syslogID,
 		SystemdUnit:      "LOGLUGGER",
-		Fields: map[string]string{
-			"MESSAGE":           message,
-			"SYSLOG_IDENTIFIER": "LOGLUGGER",
-			"_SYSTEMD_UNIT":     "LOGLUGGER",
-		},
+		Fields:           map[string]string{},
 	}
 	if eventRealtime > 0 {
 		record.RealtimeTS = &eventRealtime
@@ -255,14 +253,37 @@ func newRecoveryJournalEntry(position string, realtimeUsec uint64) *JournalEntry
 
 func recoveryLogMessage(realtimeUsec int64) string {
 	if realtimeUsec <= 0 {
-		return ":LOGLUGGER CRITICAL: " + recoveryMessageText
+		return ":LOGLUGGER ALERT: " + recoveryMessageText
 	}
 	timestamp := time.UnixMicro(realtimeUsec).UTC().Format(time.RFC3339Nano)
-	return fmt.Sprintf("%s :LOGLUGGER CRITICAL: %s", timestamp, recoveryMessageText)
+	return fmt.Sprintf("%s :LOGLUGGER ALERT: %s", timestamp, recoveryMessageText)
 }
 
 func intPtr(value int) *int {
 	return &value
+}
+
+func recoverySeqNo(eventRealtime int64) int64 {
+	if eventRealtime > 0 {
+		return eventRealtime / int64(time.Millisecond/time.Microsecond)
+	}
+	return time.Now().UnixMilli()
+}
+
+func randomUUIDLikeID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Fall back to a deterministic but valid v4-like value shape.
+		ts := uint64(time.Now().UnixNano())
+		for i := range b {
+			b[i] = byte(ts >> ((i % 8) * 8))
+		}
+	}
+	// Set UUID v4 and RFC4122 variant bits.
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	hexed := hex.EncodeToString(b[:])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", hexed[:8], hexed[8:12], hexed[12:16], hexed[16:20], hexed[20:32])
 }
 
 func journalEntryToRecord(e *sdjournal.JournalEntry) models.Record {
