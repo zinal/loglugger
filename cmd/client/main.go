@@ -70,6 +70,7 @@ func main() {
 	}()
 
 	batcher := client.NewBatcher(cfg.BatchSize, cfg.BatchTimeout)
+	seqnoGenerator := client.NewSeqNoGenerator(time.Now())
 	sender := client.NewSender(client.SenderConfig{
 		ServerURLs:  cfg.ServerURLs,
 		ClientID:    cfg.ClientID,
@@ -146,6 +147,8 @@ func main() {
 			emptyReads = 0
 		}
 
+		seqno := seqnoGenerator.Next()
+		entry.Record.SeqNo = &seqno
 		batcher.Add(entry)
 		slog.Debug("journal entry received", "systemd_unit", entry.Record.SystemdUnit, "cursor", entry.Cursor, "position", entry.Position)
 

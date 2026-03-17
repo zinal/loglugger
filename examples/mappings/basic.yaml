@@ -1,6 +1,9 @@
 field_mapping:
   - source: message
     destination: message
+  - source: seqno
+    destination: seqno
+    transform: int64
   - source: parsed.P_DTTM
     destination: log_dttm
   - source: parsed.P_SERVICE

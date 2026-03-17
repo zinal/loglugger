@@ -1,6 +1,7 @@
 package client
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/ydb-platform/loglugger/internal/models"
@@ -122,6 +123,9 @@ func (b *batcher) ShouldFlush() bool {
 
 func recordLogDataSize(record models.Record) int {
 	size := len(record.Message)
+	if record.SeqNo != nil {
+		size += len(strconv.FormatInt(*record.SeqNo, 10))
+	}
 	size += len(record.SyslogIdentifier)
 	size += len(record.SystemdUnit)
 	for _, value := range record.Parsed {

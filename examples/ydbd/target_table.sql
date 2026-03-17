@@ -7,6 +7,7 @@ CREATE TABLE `ydblogs` (
   level Utf8,
   msg Utf8,
   unit Utf8,
+  seqno Int64,
   ts_log Timestamp64 NOT NULL,
   message_hash Uint64 NOT NULL,
   hostname Utf8 NOT NULL,

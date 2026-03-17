@@ -182,6 +182,7 @@ func loadMappings(cfg serverConfig) ([]server.FieldMapping, error) {
 	}
 	return []server.FieldMapping{
 		{Source: "message", Destination: "message"},
+		{Source: "seqno", Destination: "seqno", Transform: "int64"},
 		{Source: "parsed.P_DTTM", Destination: "log_dttm", Transform: "timestamp64"},
 		{Source: "parsed.P_SERVICE", Destination: "service_name"},
 		{Source: "parsed.P_LEVEL", Destination: "log_level"},

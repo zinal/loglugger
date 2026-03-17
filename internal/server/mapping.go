@@ -109,6 +109,9 @@ func fullMessageBytes(rec models.Record) ([]byte, error) {
 		"monotonic_timestamp": rec.MonotonicTimestamp,
 		"priority":            rec.Priority,
 	}
+	if rec.SeqNo != nil {
+		payload["seqno"] = rec.SeqNo
+	}
 	if len(rec.Parsed) > 0 {
 		payload["parsed"] = stableStringMap(rec.Parsed)
 	}

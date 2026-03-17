@@ -21,6 +21,11 @@
       "destination": "raw_message"
     },
     {
+      "source": "seqno",
+      "destination": "seqno",
+      "transform": "int64"
+    },
+    {
       "source": "syslog_identifier",
       "destination": "syslog_id"
     },

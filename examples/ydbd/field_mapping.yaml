@@ -10,6 +10,9 @@ field_mapping:
   - source: message_cityhash64
     destination: message_hash
     transform: uint64
+  - source: seqno
+    destination: seqno
+    transform: int64
 
   # Parsed fields from message regex groups.
   - source: parsed.P_DTTM

@@ -7,6 +7,7 @@ import "strconv"
 type Record struct {
 	Message            string            `json:"message,omitempty"`
 	Parsed             map[string]string `json:"-"`
+	SeqNo              *int64            `json:"seqno,omitempty"`
 	Priority           *int              `json:"priority,omitempty"`
 	SyslogIdentifier   string            `json:"syslog_identifier,omitempty"`
 	SystemdUnit        string            `json:"systemd_unit,omitempty"`
@@ -26,6 +27,11 @@ func (r *Record) GetField(path string) (string, bool) {
 	case "message":
 		if r.Message != "" {
 			return r.Message, true
+		}
+		return "", false
+	case "seqno":
+		if r.SeqNo != nil {
+			return fmtInt64(*r.SeqNo), true
 		}
 		return "", false
 	case "syslog_identifier":

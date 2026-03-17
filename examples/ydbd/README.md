@@ -16,3 +16,4 @@ This folder contains a complete `ydbd`-oriented Loglugger example:
 - fallback `level=unknown` when parser fields are absent.
 - source is systemd journald records filtered by unit mask.
 - `dbname` is configured as a default value in mapping and can be customized per environment.
+- `seqno` is mapped as a monotonic client-side ordering field (starts from client startup epoch milliseconds).
