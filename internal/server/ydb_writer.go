@@ -76,9 +76,7 @@ func (w *YDBWriter) BulkUpsert(ctx context.Context, tableName string, rows []map
 	}
 	rowsValue := types.ListValue(values...)
 
-	if err := w.driver.Table().Do(ctx, func(ctx context.Context, session table.Session) error {
-		return session.BulkUpsert(ctx, tableName, rowsValue)
-	}); err != nil {
+	if err := w.driver.Table().BulkUpsert(ctx, tableName, table.BulkUpsertDataRows(rowsValue)); err != nil {
 		return fmt.Errorf("bulk upsert rows into %s: %w", tableName, err)
 	}
 	return nil
@@ -127,12 +125,6 @@ LIMIT 1;
 }
 
 func (w *YDBWriter) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string, update PositionUpdate) error {
-	tsWallUS := update.TSWall.UTC().UnixMicro()
-	if tsWallUS == 0 {
-		tsWallUS = time.Now().UTC().UnixMicro()
-	}
-	seqNoLiteral := yqlOptionalInt64Literal(update.MaxSeqNo)
-	tsOrigLiteral := yqlOptionalTimestamp64Literal(update.MaxTSOrig)
 	err := w.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
 		_, err := tx.Execute(
 			ctx,
@@ -140,7 +132,9 @@ func (w *YDBWriter) SetPosition(ctx context.Context, clientID, expectedPosition,
 DECLARE $client_id AS Utf8;
 DECLARE $old_expected_position AS Utf8;
 DECLARE $new_expected_position AS Utf8;
-DECLARE $ts_wall_us AS Int64;
+DECLARE $ts_wall_us AS Timestamp64;
+DECLARE $ts_orig AS Timestamp64?;
+DECLARE $seqno AS Int64?;
 
 $current_position = (
     SELECT exp_pos
@@ -155,12 +149,14 @@ VALUES ($client_id, Ensure(
     COALESCE($current_position, ""u) == $old_expected_position,
     "position mismatch"
 ), CAST($ts_wall_us AS Timestamp64), %s, %s);
-`, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable), seqNoLiteral, tsOrigLiteral),
+`, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
 				Param("$old_expected_position").Text(expectedPosition).
 				Param("$new_expected_position").Text(nextPosition).
-				Param("$ts_wall_us").Int64(tsWallUS).
+				Param("$ts_wall_us").Timestamp64(update.TSWall).
+				Param("$ts_orig").BeginOptional().Timestamp64(update.MaxTSOrig).EndOptional().
+				Param("$seqno").BeginOptional().Int64(update.MaxSeqNo).EndOptional().
 				Build(),
 		)
 		return err
@@ -181,27 +177,25 @@ VALUES ($client_id, Ensure(
 }
 
 func (w *YDBWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string, update PositionUpdate) error {
-	tsWallUS := update.TSWall.UTC().UnixMicro()
-	if tsWallUS == 0 {
-		tsWallUS = time.Now().UTC().UnixMicro()
-	}
-	seqNoLiteral := yqlOptionalInt64Literal(update.MaxSeqNo)
-	tsOrigLiteral := yqlOptionalTimestamp64Literal(update.MaxTSOrig)
 	err := w.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
 		_, err := tx.Execute(
 			ctx,
 			fmt.Sprintf(`
 DECLARE $client_id AS Utf8;
 DECLARE $new_expected_position AS Utf8;
-DECLARE $ts_wall_us AS Int64;
+DECLARE $ts_wall_us AS Timestamp64;
+DECLARE $ts_orig AS Timestamp64?;
+DECLARE $seqno AS Int64?;
 
 UPSERT INTO %s (client_id, exp_pos, ts_wall, seqno, ts_orig)
 VALUES ($client_id, $new_expected_position, CAST($ts_wall_us AS Timestamp64), %s, %s);
-`, quoteYDBPath(w.positionTable), seqNoLiteral, tsOrigLiteral),
+`, quoteYDBPath(w.positionTable)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
 				Param("$new_expected_position").Text(nextPosition).
-				Param("$ts_wall_us").Int64(tsWallUS).
+				Param("$ts_wall_us").Timestamp64(update.TSWall).
+				Param("$ts_orig").BeginOptional().Timestamp64(update.MaxTSOrig).EndOptional().
+				Param("$seqno").BeginOptional().Int64(update.MaxSeqNo).EndOptional().
 				Build(),
 		)
 		return err
@@ -212,20 +206,6 @@ VALUES ($client_id, $new_expected_position, CAST($ts_wall_us AS Timestamp64), %s
 		return fmt.Errorf("store expected position in %s: %w", w.positionTable, err)
 	}
 	return nil
-}
-
-func yqlOptionalInt64Literal(value *int64) string {
-	if value == nil {
-		return "CAST(NULL AS Int64?)"
-	}
-	return fmt.Sprintf("CAST(%d AS Int64?)", *value)
-}
-
-func yqlOptionalTimestamp64Literal(value *time.Time) string {
-	if value == nil {
-		return "CAST(NULL AS Timestamp64?)"
-	}
-	return fmt.Sprintf("CAST(%d AS Timestamp64?)", value.UTC().UnixMicro())
 }
 
 func encodeYDBValue(value interface{}) (types.Value, error) {
