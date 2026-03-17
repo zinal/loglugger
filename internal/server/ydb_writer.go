@@ -130,13 +130,13 @@ func (w *YDBWriter) SetPosition(ctx context.Context, clientID, expectedPosition,
 			ctx,
 			fmt.Sprintf(`
 DECLARE $client_id AS Utf8;
-DECLARE $old_expected_position AS Utf8;
-DECLARE $new_expected_position AS Utf8;
+DECLARE $old_exp_pos AS Utf8;
+DECLARE $new_exp_pos AS Utf8;
 DECLARE $ts_wall_us AS Timestamp64;
 DECLARE $ts_orig AS Timestamp64?;
 DECLARE $seqno AS Int64?;
 
-$current_position = (
+$current_pos = (
     SELECT exp_pos
     FROM %s
     WHERE client_id = $client_id
@@ -144,16 +144,15 @@ $current_position = (
 );
 
 UPSERT INTO %s (client_id, exp_pos, ts_wall, seqno, ts_orig)
-VALUES ($client_id, Ensure(
-    $new_expected_position,
-    COALESCE($current_position, ""u) == $old_expected_position,
-    "position mismatch"
-), CAST($ts_wall_us AS Timestamp64), %s, %s);
+VALUES ($client_id, Ensure($new_exp_pos,
+			COALESCE($current_pos, ""u) == $old_exp_pos,
+			"position mismatch"),
+	$ts_wall_us, $seqno, $ts_orig);
 `, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
-				Param("$old_expected_position").Text(expectedPosition).
-				Param("$new_expected_position").Text(nextPosition).
+				Param("$old_exp_pos").Text(expectedPosition).
+				Param("$new_exp_pos").Text(nextPosition).
 				Param("$ts_wall_us").Timestamp64(update.TSWall).
 				Param("$ts_orig").BeginOptional().Timestamp64(update.MaxTSOrig).EndOptional().
 				Param("$seqno").BeginOptional().Int64(update.MaxSeqNo).EndOptional().
@@ -182,17 +181,17 @@ func (w *YDBWriter) SetPositionUnconditional(ctx context.Context, clientID, next
 			ctx,
 			fmt.Sprintf(`
 DECLARE $client_id AS Utf8;
-DECLARE $new_expected_position AS Utf8;
+DECLARE $exp_pos AS Utf8;
 DECLARE $ts_wall_us AS Timestamp64;
 DECLARE $ts_orig AS Timestamp64?;
 DECLARE $seqno AS Int64?;
 
 UPSERT INTO %s (client_id, exp_pos, ts_wall, seqno, ts_orig)
-VALUES ($client_id, $new_expected_position, CAST($ts_wall_us AS Timestamp64), %s, %s);
+VALUES ($client_id, $exp_pos, $ts_wall_us, $seqno, $ts_orig);
 `, quoteYDBPath(w.positionTable)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
-				Param("$new_expected_position").Text(nextPosition).
+				Param("$exp_pos").Text(nextPosition).
 				Param("$ts_wall_us").Timestamp64(update.TSWall).
 				Param("$ts_orig").BeginOptional().Timestamp64(update.MaxTSOrig).EndOptional().
 				Param("$seqno").BeginOptional().Int64(update.MaxSeqNo).EndOptional().
