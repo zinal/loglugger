@@ -266,29 +266,34 @@ func intPtr(value int) *int {
 }
 
 func journalEntryToRecord(e *sdjournal.JournalEntry) models.Record {
-	rec := models.Record{Fields: make(map[string]string)}
-	rec.Message = e.Fields["MESSAGE"]
-	if v, ok := e.Fields["PRIORITY"]; ok {
-		if p, err := strconv.Atoi(v); err == nil {
-			rec.Priority = &p
-		}
+	fieldsCap := len(e.Fields) - 5
+	if fieldsCap < 0 {
+		fieldsCap = 0
 	}
-	rec.SyslogIdentifier = e.Fields["SYSLOG_IDENTIFIER"]
-	rec.SystemdUnit = e.Fields["_SYSTEMD_UNIT"]
-	if v, ok := e.Fields["__REALTIME_TIMESTAMP"]; ok {
-		if t, err := strconv.ParseInt(v, 10, 64); err == nil {
-			rec.RealtimeTS = &t
+	rec := models.Record{Fields: make(map[string]string, fieldsCap)}
+	for k, v := range e.Fields {
+		switch k {
+		case "MESSAGE":
+			rec.Message = v
+		case "PRIORITY":
+			if p, err := strconv.Atoi(v); err == nil {
+				rec.Priority = &p
+			}
+		case "SYSLOG_IDENTIFIER":
+			rec.SyslogIdentifier = v
+		case "_SYSTEMD_UNIT":
+			rec.SystemdUnit = v
+		case "__REALTIME_TIMESTAMP":
+			if t, err := strconv.ParseInt(v, 10, 64); err == nil {
+				rec.RealtimeTS = &t
+			}
+		default:
+			rec.Fields[k] = v
 		}
 	}
 	if rec.RealtimeTS == nil {
 		t := int64(e.RealtimeTimestamp)
 		rec.RealtimeTS = &t
-	}
-	for k, v := range e.Fields {
-		if k != "MESSAGE" && k != "PRIORITY" && k != "SYSLOG_IDENTIFIER" &&
-			k != "_SYSTEMD_UNIT" && k != "__REALTIME_TIMESTAMP" {
-			rec.Fields[k] = v
-		}
 	}
 	return rec
 }
