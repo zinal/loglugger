@@ -30,6 +30,7 @@ type batcher struct {
 	entries      []*JournalEntry
 	entrySizes   []int
 	dataBytes    int
+	journalCount int
 }
 
 // NewBatcher creates a batcher.
@@ -48,6 +49,9 @@ func (b *batcher) Add(entry *JournalEntry) {
 	b.entries = append(b.entries, entry)
 	b.entrySizes = append(b.entrySizes, size)
 	b.dataBytes += size
+	if entry.Cursor != "" {
+		b.journalCount++
+	}
 }
 
 func (b *batcher) Flush() *Batch {
@@ -92,10 +96,12 @@ func (b *batcher) Flush() *Batch {
 	}
 
 	b.dataBytes -= batchBytes
+	b.journalCount -= realCount
 	if fitCount >= len(b.entries) {
 		b.entries = b.entries[:0]
 		b.entrySizes = b.entrySizes[:0]
 		b.dataBytes = 0
+		b.journalCount = 0
 	} else {
 		b.entries = b.entries[fitCount:]
 		b.entrySizes = b.entrySizes[fitCount:]
@@ -105,14 +111,7 @@ func (b *batcher) Flush() *Batch {
 }
 
 func (b *batcher) ShouldFlush() bool {
-	hasJournalPosition := false
-	for _, entry := range b.entries {
-		if entry.Cursor != "" {
-			hasJournalPosition = true
-			break
-		}
-	}
-	if !hasJournalPosition {
+	if b.journalCount == 0 {
 		return false
 	}
 	if b.maxSize > 0 && len(b.entries) >= b.maxSize {

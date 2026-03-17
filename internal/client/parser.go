@@ -22,21 +22,26 @@ type MessageParser interface {
 
 type messageParser struct {
 	messageRe             *regexp.Regexp
-	messageGroupNames     []string
+	messageGroups         []namedGroup
 	messageBodyGroupIndex int
 	systemdUnitRe         *regexp.Regexp
-	systemdUnitGroupNames []string
+	systemdUnitGroups     []namedGroup
 	noMatch               NoMatchAction
+}
+
+type namedGroup struct {
+	name  string
+	index int
 }
 
 // NewRecordParser creates a parser for optional message/systemd unit regex extraction.
 // If both regexes are empty, returns nil (no parsing).
 func NewRecordParser(messageRegex string, noMatch NoMatchAction, systemdUnitRegex string) (MessageParser, error) {
-	messageRe, messageGroupNames, err := compileNamedRegex(messageRegex)
+	messageRe, messageGroups, err := compileNamedRegex(messageRegex)
 	if err != nil {
 		return nil, err
 	}
-	systemdUnitRe, systemdUnitGroupNames, err := compileNamedRegex(systemdUnitRegex)
+	systemdUnitRe, systemdUnitGroups, err := compileNamedRegex(systemdUnitRegex)
 	if err != nil {
 		return nil, err
 	}
@@ -49,15 +54,15 @@ func NewRecordParser(messageRegex string, noMatch NoMatchAction, systemdUnitRege
 	}
 	return &messageParser{
 		messageRe:             messageRe,
-		messageGroupNames:     messageGroupNames,
+		messageGroups:         messageGroups,
 		messageBodyGroupIndex: messageBodyGroupIndex,
 		systemdUnitRe:         systemdUnitRe,
-		systemdUnitGroupNames: systemdUnitGroupNames,
+		systemdUnitGroups:     systemdUnitGroups,
 		noMatch:               noMatch,
 	}, nil
 }
 
-func compileNamedRegex(regexStr string) (*regexp.Regexp, []string, error) {
+func compileNamedRegex(regexStr string) (*regexp.Regexp, []namedGroup, error) {
 	if regexStr == "" {
 		return nil, nil, nil
 	}
@@ -66,13 +71,13 @@ func compileNamedRegex(regexStr string) (*regexp.Regexp, []string, error) {
 		return nil, nil, err
 	}
 	names := re.SubexpNames()
-	groupNames := make([]string, 0, len(names))
-	for _, n := range names {
+	groups := make([]namedGroup, 0, len(names))
+	for i, n := range names {
 		if n != "" {
-			groupNames = append(groupNames, n)
+			groups = append(groups, namedGroup{name: n, index: i})
 		}
 	}
-	return re, groupNames, nil
+	return re, groups, nil
 }
 
 func (p *messageParser) Parse(rec models.Record) (models.Record, bool) {
@@ -89,7 +94,7 @@ func (p *messageParser) Parse(rec models.Record) (models.Record, bool) {
 	if p.systemdUnitRe != nil {
 		matches := p.systemdUnitRe.FindStringSubmatch(rec.SystemdUnit)
 		if matches != nil {
-			p.extractNamedGroups(&out, p.systemdUnitRe, p.systemdUnitGroupNames, matches)
+			p.extractNamedGroups(&out, p.systemdUnitGroups, matches)
 		}
 	}
 
@@ -99,7 +104,7 @@ func (p *messageParser) Parse(rec models.Record) (models.Record, bool) {
 func (p *messageParser) parseMessage(out *models.Record, message string) bool {
 	matches := p.messageRe.FindStringSubmatch(message)
 	if matches != nil {
-		p.extractNamedGroups(out, p.messageRe, p.messageGroupNames, matches)
+		p.extractNamedGroups(out, p.messageGroups, matches)
 		return true
 	}
 
@@ -111,7 +116,7 @@ func (p *messageParser) parseMessage(out *models.Record, message string) bool {
 	if matches == nil {
 		return false
 	}
-	p.extractNamedGroups(out, p.messageRe, p.messageGroupNames, matches)
+	p.extractNamedGroups(out, p.messageGroups, matches)
 	if extraLines != "" && p.messageBodyGroupIndex >= 0 && p.messageBodyGroupIndex < len(matches) {
 		if out.Parsed == nil {
 			out.Parsed = make(map[string]string)
@@ -134,17 +139,17 @@ func splitFirstLine(message string) (string, string, bool) {
 	return message[:idx], message[idx+1:], true
 }
 
-func (p *messageParser) extractNamedGroups(rec *models.Record, re *regexp.Regexp, names []string, matches []string) {
+func (p *messageParser) extractNamedGroups(rec *models.Record, groups []namedGroup, matches []string) {
 	if rec.Parsed == nil {
 		rec.Parsed = make(map[string]string)
 	}
-	for _, name := range names {
-		idx := re.SubexpIndex(name)
+	for _, group := range groups {
+		idx := group.index
 		if idx >= 0 && idx < len(matches) && matches[idx] != "" {
-			if _, exists := rec.Parsed[name]; exists {
+			if _, exists := rec.Parsed[group.name]; exists {
 				continue
 			}
-			rec.Parsed[name] = matches[idx]
+			rec.Parsed[group.name] = matches[idx]
 		}
 	}
 }
