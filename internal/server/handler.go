@@ -100,22 +100,22 @@ func (h *Handler) serveBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	defer closeFn()
 
-	payload, err := io.ReadAll(io.LimitReader(body, h.maxDecompressedBodyBytes+1))
-	if err != nil {
+	var req models.BatchRequest
+	limitedBody := newDecompressedBodyLimiter(body, h.maxDecompressedBodyBytes)
+	dec := json.NewDecoder(limitedBody)
+	if err := dec.Decode(&req); err != nil {
 		if isRequestTooLarge(err) {
 			h.writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
 			return
 		}
-		h.writeError(w, http.StatusBadRequest, "failed to read request body: "+err.Error())
+		h.writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if int64(len(payload)) > h.maxDecompressedBodyBytes {
-		h.writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
-		return
-	}
-
-	var req models.BatchRequest
-	if err := json.Unmarshal(payload, &req); err != nil {
+	if err := ensureNoTrailingJSON(dec); err != nil {
+		if isRequestTooLarge(err) {
+			h.writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
+			return
+		}
 		h.writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
@@ -144,6 +144,48 @@ func decodeRequestBody(r *http.Request) (io.Reader, func(), error) {
 	return nil, nil, fmt.Errorf("unsupported Content-Encoding %q", encoding)
 }
 
+func ensureNoTrailingJSON(dec *json.Decoder) error {
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("extra data after top-level JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+type decompressedBodyLimiter struct {
+	reader    io.Reader
+	remaining int64
+	limit     int64
+}
+
+func newDecompressedBodyLimiter(reader io.Reader, limit int64) *decompressedBodyLimiter {
+	return &decompressedBodyLimiter{
+		reader:    reader,
+		remaining: limit,
+		limit:     limit,
+	}
+}
+
+func (l *decompressedBodyLimiter) Read(p []byte) (int, error) {
+	if l.remaining > 0 {
+		if int64(len(p)) > l.remaining {
+			p = p[:l.remaining]
+		}
+		n, err := l.reader.Read(p)
+		l.remaining -= int64(n)
+		return n, err
+	}
+	var probe [1]byte
+	n, err := l.reader.Read(probe[:])
+	if n > 0 {
+		return 0, &http.MaxBytesError{Limit: l.limit}
+	}
+	return 0, err
+}
+
 func (h *Handler) handlePosition(ctx context.Context, clientID string) *models.PositionResponse {
 	if clientID == "" {
 		return &models.PositionResponse{Status: "error", Message: "client_id is required"}
@@ -168,17 +210,11 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 	if !req.Reset && req.CurrentPosition == "" {
 		return &models.BatchResponse{Status: "error", Message: "current_position is required when reset is false"}
 	}
-	for i := range req.Records {
-		if err := validateRecord(req.Records[i]); err != nil {
-			return &models.BatchResponse{Status: "error", Message: fmt.Sprintf("invalid records[%d]: %v", i, err)}
-		}
-	}
-
 	if req.Reset {
 		positionUpdate := positionUpdateFromRecords(req.Records)
 		slog.Info("reset batch received from client", "client_id", req.ClientID, "next_position", req.NextPosition, "records", len(req.Records))
 		if len(req.Records) > 0 {
-			rows, err := h.mapRecords(req.ClientID, req.Records)
+			rows, err := h.validateAndMapRecords(req.ClientID, req.Records)
 			if err != nil {
 				return &models.BatchResponse{Status: "error", Message: err.Error()}
 			}
@@ -213,7 +249,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 	}
 
 	if len(req.Records) > 0 {
-		rows, err := h.mapRecords(req.ClientID, req.Records)
+		rows, err := h.validateAndMapRecords(req.ClientID, req.Records)
 		if err != nil {
 			return &models.BatchResponse{Status: "error", Message: err.Error()}
 		}
@@ -267,9 +303,13 @@ func validateRecord(rec models.Record) error {
 	return nil
 }
 
-func (h *Handler) mapRecords(clientID string, records []models.Record) ([]map[string]interface{}, error) {
+func (h *Handler) validateAndMapRecords(clientID string, records []models.Record) ([]map[string]interface{}, error) {
 	rows := make([]map[string]interface{}, 0, len(records))
-	for _, rec := range records {
+	for i := range records {
+		rec := records[i]
+		if err := validateRecord(rec); err != nil {
+			return nil, fmt.Errorf("invalid records[%d]: %w", i, err)
+		}
 		row, err := h.mapper.MapRecord(clientID, rec)
 		if err != nil {
 			return nil, err
