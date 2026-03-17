@@ -5,6 +5,8 @@ journal_recovery: true
 message_regex: '^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$'
 systemd_unit_regex: '^ydbd-(?P<P_DBNAME>[^-]+)-.*\.service$'
 message_regex_no_match: "send_raw"
+multiline_timeout: "1s"
+multiline_max_messages: 1000
 
 batch_size: 50000
 batch_timeout: "5s"

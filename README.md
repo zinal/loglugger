@@ -53,6 +53,10 @@ Client configuration:
 - `service_mask: "nginx*.service"` uses glob matching.
 - `service_mask: "regex:^nginx-(api|worker)\\.service$"` uses regex matching.
 - `message_regex`, `systemd_unit_regex`, and `message_regex_no_match` configure client-side parsing before records are sent to the server.
+- Multiline merge is active only when `message_regex` is configured:
+  - continuation lines are appended to the current message until the next line matches `message_regex`;
+  - `multiline_timeout` (default `1s`) flushes pending multiline message when no next line arrives;
+  - `multiline_max_messages` (default `1000`) limits how many source lines are merged into one output message.
 - `journal_recovery: true` enables best-effort recovery after journal corruption (`EBADMSG` / `bad message`). This mode is off by default because it may skip corrupted regions and therefore lose some data. Without it, the client logs the corruption and stops immediately.
 - `server_url` / `server_urls` configure one or more endpoints; the client keeps using the current endpoint while requests succeed and switches to the next one only after a transient failure (`5xx` or network error).
 - `tls_ca_file` and `tls_use_system_pool` control the client trust store.

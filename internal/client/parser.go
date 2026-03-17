@@ -2,6 +2,7 @@ package client
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/ydb-platform/loglugger/internal/models"
 )
@@ -22,6 +23,7 @@ type MessageParser interface {
 type messageParser struct {
 	messageRe             *regexp.Regexp
 	messageGroupNames     []string
+	messageBodyGroupIndex int
 	systemdUnitRe         *regexp.Regexp
 	systemdUnitGroupNames []string
 	noMatch               NoMatchAction
@@ -41,9 +43,14 @@ func NewRecordParser(messageRegex string, noMatch NoMatchAction, systemdUnitRege
 	if messageRe == nil && systemdUnitRe == nil {
 		return nil, nil
 	}
+	messageBodyGroupIndex := -1
+	if messageRe != nil {
+		messageBodyGroupIndex = messageRe.SubexpIndex("P_MESSAGE")
+	}
 	return &messageParser{
 		messageRe:             messageRe,
 		messageGroupNames:     messageGroupNames,
+		messageBodyGroupIndex: messageBodyGroupIndex,
 		systemdUnitRe:         systemdUnitRe,
 		systemdUnitGroupNames: systemdUnitGroupNames,
 		noMatch:               noMatch,
@@ -72,13 +79,10 @@ func (p *messageParser) Parse(rec models.Record) (models.Record, bool) {
 	out := rec
 
 	if p.messageRe != nil {
-		matches := p.messageRe.FindStringSubmatch(rec.Message)
-		if matches == nil {
+		if !p.parseMessage(&out, rec.Message) {
 			if p.noMatch == NoMatchSkip {
 				return models.Record{}, false
 			}
-		} else {
-			p.extractNamedGroups(&out, p.messageRe, p.messageGroupNames, matches)
 		}
 	}
 
@@ -90,6 +94,44 @@ func (p *messageParser) Parse(rec models.Record) (models.Record, bool) {
 	}
 
 	return out, true
+}
+
+func (p *messageParser) parseMessage(out *models.Record, message string) bool {
+	matches := p.messageRe.FindStringSubmatch(message)
+	if matches != nil {
+		p.extractNamedGroups(out, p.messageRe, p.messageGroupNames, matches)
+		return true
+	}
+
+	firstLine, extraLines, hasExtra := splitFirstLine(message)
+	if !hasExtra {
+		return false
+	}
+	matches = p.messageRe.FindStringSubmatch(firstLine)
+	if matches == nil {
+		return false
+	}
+	p.extractNamedGroups(out, p.messageRe, p.messageGroupNames, matches)
+	if extraLines != "" && p.messageBodyGroupIndex >= 0 && p.messageBodyGroupIndex < len(matches) {
+		if out.Parsed == nil {
+			out.Parsed = make(map[string]string)
+		}
+		base := matches[p.messageBodyGroupIndex]
+		if base == "" {
+			out.Parsed["P_MESSAGE"] = extraLines
+		} else {
+			out.Parsed["P_MESSAGE"] = base + "\n" + extraLines
+		}
+	}
+	return true
+}
+
+func splitFirstLine(message string) (string, string, bool) {
+	idx := strings.IndexByte(message, '\n')
+	if idx < 0 {
+		return message, "", false
+	}
+	return message[:idx], message[idx+1:], true
 }
 
 func (p *messageParser) extractNamedGroups(rec *models.Record, re *regexp.Regexp, names []string, matches []string) {

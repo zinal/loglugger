@@ -24,24 +24,26 @@ import (
 )
 
 type clientConfig struct {
-	ServerURL        string        `json:"server_url" yaml:"server_url"`
-	ServerURLs       []string      `json:"server_urls" yaml:"server_urls"`
-	ClientID         string        `json:"client_id" yaml:"client_id"`
-	ServiceMask      string        `json:"service_mask" yaml:"service_mask"`
-	JournalNamespace string        `json:"journal_namespace" yaml:"journal_namespace"`
-	JournalRecovery  bool          `json:"journal_recovery" yaml:"journal_recovery"`
-	MessageRegex     string        `json:"message_regex" yaml:"message_regex"`
-	SystemdUnitRegex string        `json:"systemd_unit_regex" yaml:"systemd_unit_regex"`
-	MessageNoMatch   string        `json:"message_regex_no_match" yaml:"message_regex_no_match"`
-	Debug            bool          `json:"debug" yaml:"debug"`
-	BatchSize        int           `json:"batch_size" yaml:"batch_size"`
-	BatchTimeout     time.Duration `json:"batch_timeout" yaml:"batch_timeout"`
-	HTTPTimeout      time.Duration `json:"http_timeout" yaml:"http_timeout"`
-	RetryDelay       time.Duration `json:"retry_delay" yaml:"retry_delay"`
-	TLSCAFile        string        `json:"tls_ca_file" yaml:"tls_ca_file"`
-	TLSCertFile      string        `json:"tls_cert_file" yaml:"tls_cert_file"`
-	TLSKeyFile       string        `json:"tls_key_file" yaml:"tls_key_file"`
-	TLSUseSystemPool bool          `json:"tls_use_system_pool" yaml:"tls_use_system_pool"`
+	ServerURL            string        `json:"server_url" yaml:"server_url"`
+	ServerURLs           []string      `json:"server_urls" yaml:"server_urls"`
+	ClientID             string        `json:"client_id" yaml:"client_id"`
+	ServiceMask          string        `json:"service_mask" yaml:"service_mask"`
+	JournalNamespace     string        `json:"journal_namespace" yaml:"journal_namespace"`
+	JournalRecovery      bool          `json:"journal_recovery" yaml:"journal_recovery"`
+	MessageRegex         string        `json:"message_regex" yaml:"message_regex"`
+	SystemdUnitRegex     string        `json:"systemd_unit_regex" yaml:"systemd_unit_regex"`
+	MessageNoMatch       string        `json:"message_regex_no_match" yaml:"message_regex_no_match"`
+	MultilineTimeout     time.Duration `json:"multiline_timeout" yaml:"multiline_timeout"`
+	MultilineMaxMessages int           `json:"multiline_max_messages" yaml:"multiline_max_messages"`
+	Debug                bool          `json:"debug" yaml:"debug"`
+	BatchSize            int           `json:"batch_size" yaml:"batch_size"`
+	BatchTimeout         time.Duration `json:"batch_timeout" yaml:"batch_timeout"`
+	HTTPTimeout          time.Duration `json:"http_timeout" yaml:"http_timeout"`
+	RetryDelay           time.Duration `json:"retry_delay" yaml:"retry_delay"`
+	TLSCAFile            string        `json:"tls_ca_file" yaml:"tls_ca_file"`
+	TLSCertFile          string        `json:"tls_cert_file" yaml:"tls_cert_file"`
+	TLSKeyFile           string        `json:"tls_key_file" yaml:"tls_key_file"`
+	TLSUseSystemPool     bool          `json:"tls_use_system_pool" yaml:"tls_use_system_pool"`
 }
 
 func main() {
@@ -93,6 +95,11 @@ func main() {
 		slog.Error("create client parser", "error", err)
 		os.Exit(1)
 	}
+	multilineMerger, err := buildMultilineMerger(cfg)
+	if err != nil {
+		slog.Error("create multiline merger", "error", err)
+		os.Exit(1)
+	}
 
 	ctx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
@@ -118,13 +125,54 @@ func main() {
 	flushTicker := time.NewTicker(cfg.BatchTimeout)
 	defer flushTicker.Stop()
 	emptyReads := 0
+	processEntry := func(entry *client.JournalEntry) {
+		if entry == nil {
+			return
+		}
+		record := entry.Record
+		if parser != nil {
+			parsedRecord, ok := parser.Parse(record)
+			if !ok {
+				return
+			}
+			record = parsedRecord
+		}
+		seqno := seqnoGenerator.Next()
+		record.SeqNo = &seqno
+		entry.Record = record
+		batcher.Add(entry)
+		slog.Debug("journal entry received", "systemd_unit", entry.Record.SystemdUnit, "cursor", entry.Cursor, "position", entry.Position)
+
+		if batcher.ShouldFlush() {
+			if batch := batcher.Flush(); batch != nil {
+				slog.Debug("flush by batch limit", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
+				reset = sendBatch(ctx, journal, sender, batch, reset)
+			}
+		}
+	}
+	drainExpiredMultiline := func(now time.Time) {
+		if multilineMerger == nil {
+			return
+		}
+		if ready := multilineMerger.DrainExpired(now); ready != nil {
+			processEntry(ready)
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
+			if multilineMerger != nil {
+				processEntry(multilineMerger.Drain())
+			}
+			if batch := batcher.Flush(); batch != nil {
+				slog.Debug("flush on shutdown", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
+				_ = sendBatch(ctx, journal, sender, batch, reset)
+			}
 			slog.Info("shutting down")
 			return
 		case <-flushTicker.C:
+			drainExpiredMultiline(time.Now())
 			if batch := batcher.Flush(); batch != nil {
 				slog.Debug("flush by timeout", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
 				reset = sendBatch(ctx, journal, sender, batch, reset)
@@ -154,6 +202,7 @@ func main() {
 			if emptyReads == 1 || emptyReads%100 == 0 {
 				slog.Debug("journal has no new entries", "empty_reads", emptyReads)
 			}
+			drainExpiredMultiline(time.Now())
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
@@ -162,26 +211,14 @@ func main() {
 			emptyReads = 0
 		}
 
-		record := entry.Record
-		if parser != nil {
-			parsedRecord, ok := parser.Parse(record)
-			if !ok {
-				continue
+		if multilineMerger != nil {
+			ready := multilineMerger.Add(entry, time.Now())
+			for _, merged := range ready {
+				processEntry(merged)
 			}
-			record = parsedRecord
+			continue
 		}
-		seqno := seqnoGenerator.Next()
-		record.SeqNo = &seqno
-		entry.Record = record
-		batcher.Add(entry)
-		slog.Debug("journal entry received", "systemd_unit", entry.Record.SystemdUnit, "cursor", entry.Cursor, "position", entry.Position)
-
-		if batcher.ShouldFlush() {
-			if batch := batcher.Flush(); batch != nil {
-				slog.Debug("flush by batch limit", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
-				reset = sendBatch(ctx, journal, sender, batch, reset)
-			}
-		}
+		processEntry(entry)
 	}
 }
 
@@ -209,7 +246,7 @@ func isJournalCorruption(err error) bool {
 
 func recoverFromJournalCorruption(ctx context.Context, journal client.JournalReader, enabled bool) (bool, error) {
 	if !enabled {
-		return false, fmt.Errorf("journal corruption detected; stopping. Re-run with -journal-recovery=true to attempt best-effort recovery with possible data loss")
+		return false, fmt.Errorf("journal corruption detected; stopping. Enable journal_recovery in client config to attempt best-effort recovery with possible data loss")
 	}
 	slog.Warn("journal corruption detected; attempting best-effort recovery, some data loss is possible")
 	reset, err := journal.Recover(ctx)
@@ -232,11 +269,13 @@ func setupClientLogger(debug bool) {
 
 func defaultClientConfig() clientConfig {
 	return clientConfig{
-		BatchSize:      50000,
-		BatchTimeout:   5 * time.Second,
-		HTTPTimeout:    30 * time.Second,
-		RetryDelay:     time.Second,
-		MessageNoMatch: string(client.NoMatchSendRaw),
+		BatchSize:            50000,
+		BatchTimeout:         5 * time.Second,
+		HTTPTimeout:          30 * time.Second,
+		RetryDelay:           time.Second,
+		MessageNoMatch:       string(client.NoMatchSendRaw),
+		MultilineTimeout:     time.Second,
+		MultilineMaxMessages: 1000,
 	}
 }
 
@@ -276,6 +315,19 @@ func buildRecordParser(cfg clientConfig) (client.MessageParser, error) {
 		return nil, fmt.Errorf("message_regex_no_match must be send_raw or skip")
 	}
 	return client.NewRecordParser(strings.TrimSpace(cfg.MessageRegex), action, strings.TrimSpace(cfg.SystemdUnitRegex))
+}
+
+func buildMultilineMerger(cfg clientConfig) (*client.MultilineMerger, error) {
+	if strings.TrimSpace(cfg.MessageRegex) == "" {
+		return nil, nil
+	}
+	if cfg.MultilineTimeout <= 0 {
+		return nil, fmt.Errorf("multiline_timeout must be greater than zero")
+	}
+	if cfg.MultilineMaxMessages <= 0 {
+		return nil, fmt.Errorf("multiline_max_messages must be greater than zero")
+	}
+	return client.NewMultilineMerger(cfg.MessageRegex, cfg.MultilineTimeout, cfg.MultilineMaxMessages)
 }
 
 func buildClientTLSConfig(cfg clientConfig) (*tls.Config, error) {

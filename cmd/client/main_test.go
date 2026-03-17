@@ -258,6 +258,8 @@ server_url: https://a:27312,https://b:27312
 debug: true
 batch_size: 123
 batch_timeout: 7s
+multiline_timeout: 2s
+multiline_max_messages: 42
 `)
 	os.Args = []string{"client", "-config", configPath}
 	cfg, err := parseClientConfig()
@@ -272,6 +274,12 @@ batch_timeout: 7s
 	}
 	if cfg.BatchTimeout != 7*time.Second {
 		t.Fatalf("BatchTimeout = %v, want 7s", cfg.BatchTimeout)
+	}
+	if cfg.MultilineTimeout != 2*time.Second {
+		t.Fatalf("MultilineTimeout = %v, want 2s", cfg.MultilineTimeout)
+	}
+	if cfg.MultilineMaxMessages != 42 {
+		t.Fatalf("MultilineMaxMessages = %d, want 42", cfg.MultilineMaxMessages)
 	}
 	want := []string{"https://a:27312", "https://b:27312"}
 	if !sameStringsIgnoringOrder(cfg.ServerURLs, want) {
@@ -306,6 +314,38 @@ func TestBuildRecordParserRejectsInvalidNoMatchAction(t *testing.T) {
 	}
 }
 
+func TestBuildMultilineMergerDisabledWithoutMessageRegex(t *testing.T) {
+	merger, err := buildMultilineMerger(clientConfig{
+		MultilineTimeout:     time.Second,
+		MultilineMaxMessages: 1000,
+	})
+	if err != nil {
+		t.Fatalf("buildMultilineMerger() error = %v", err)
+	}
+	if merger != nil {
+		t.Fatal("expected nil merger when message_regex is empty")
+	}
+}
+
+func TestBuildMultilineMergerValidatesSettings(t *testing.T) {
+	_, err := buildMultilineMerger(clientConfig{
+		MessageRegex:         `^INFO:.*$`,
+		MultilineTimeout:     0,
+		MultilineMaxMessages: 1000,
+	})
+	if err == nil {
+		t.Fatal("expected timeout validation error")
+	}
+	_, err = buildMultilineMerger(clientConfig{
+		MessageRegex:         `^INFO:.*$`,
+		MultilineTimeout:     time.Second,
+		MultilineMaxMessages: 0,
+	})
+	if err == nil {
+		t.Fatal("expected max-messages validation error")
+	}
+}
+
 func writeTempClientConfig(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "client.yaml")
@@ -320,7 +360,7 @@ func TestRecoverFromJournalCorruptionDisabled(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when recovery is disabled")
 	}
-	if !strings.Contains(err.Error(), "-journal-recovery=true") {
+	if !strings.Contains(err.Error(), "journal_recovery") {
 		t.Fatalf("error = %q, want recovery option hint", err)
 	}
 }

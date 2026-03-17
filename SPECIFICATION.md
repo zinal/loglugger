@@ -102,6 +102,15 @@ The system implements a **position-tracking protocol** to ensure exactly-once de
 
 The client sends raw `message` to the server and may additionally send `parsed` groups extracted by client-side regex parsing (`message_regex`, `systemd_unit_regex`).
 
+When `message_regex` is configured, the client also supports multiline merge:
+
+- Start with the current journal message text.
+- Append subsequent message texts (joined with newline) while they do not match `message_regex`.
+- Stop merging when one of the following happens:
+  - the next message matches `message_regex` (it starts a new independent message);
+  - the next message does not arrive within `multiline_timeout` (default `1s`);
+  - the number of merged source messages reaches `multiline_max_messages` (default `1000`).
+
 ### 4.5 Batching
 
 - **Record count limit**: `batch_size` defines the maximum number of records in a normal batch.
@@ -436,6 +445,8 @@ loglugger/
 | message_regex | string | "" | Regex with named groups for client-side `message` parsing |
 | systemd_unit_regex | string | "" | Regex with named groups for client-side `systemd_unit` parsing |
 | message_regex_no_match | string | send_raw | Client behavior when message regex does not match: `send_raw` or `skip` |
+| multiline_timeout | duration | 1s | Multiline merge timeout; used only when `message_regex` is set |
+| multiline_max_messages | int | 1000 | Max number of source messages merged into one output message; used only when `message_regex` is set |
 | batch_size | int | 50000 | Max records per batch (also constrained by the fixed 10 MB uncompressed log-data limit per request) |
 | batch_timeout | duration | 5s | Max time before flushing partial batch |
 | http_timeout | duration | 30s | HTTP request timeout |

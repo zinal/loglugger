@@ -115,3 +115,35 @@ func TestRecordParserEmptyRegexes(t *testing.T) {
 		t.Fatal("expected nil parser when both regexes are empty")
 	}
 }
+
+func TestRecordParserStandardRegexMultilineAppendsToPMessage(t *testing.T) {
+	parser, err := NewRecordParser(
+		`^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$`,
+		NoMatchSendRaw,
+		"",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := models.Record{
+		Message: "2025-03-13T10:00:00 :nginx ERROR: request failed\nstack line 1\nstack line 2",
+	}
+	got, ok := parser.Parse(rec)
+	if !ok {
+		t.Fatal("Parse() ok = false, want true")
+	}
+	if got.Parsed["P_DTTM"] != "2025-03-13T10:00:00" {
+		t.Fatalf("P_DTTM = %q", got.Parsed["P_DTTM"])
+	}
+	if got.Parsed["P_SERVICE"] != "nginx" {
+		t.Fatalf("P_SERVICE = %q", got.Parsed["P_SERVICE"])
+	}
+	if got.Parsed["P_LEVEL"] != "ERROR" {
+		t.Fatalf("P_LEVEL = %q", got.Parsed["P_LEVEL"])
+	}
+	wantMessage := "request failed\nstack line 1\nstack line 2"
+	if got.Parsed["P_MESSAGE"] != wantMessage {
+		t.Fatalf("P_MESSAGE = %q, want %q", got.Parsed["P_MESSAGE"], wantMessage)
+	}
+}
