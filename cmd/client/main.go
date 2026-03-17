@@ -150,7 +150,6 @@ func main() {
 		record.SeqNo = &seqno
 		entry.Record = record
 		batcher.Add(entry)
-		slog.Debug("journal entry received", "systemd_unit", entry.Record.SystemdUnit, "cursor", entry.Cursor, "position", entry.Position)
 
 		if batcher.ShouldFlush() {
 			if batch := batcher.Flush(); batch != nil {
@@ -417,7 +416,13 @@ func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bo
 }
 
 func sendBatch(ctx context.Context, journal client.JournalReader, sender client.Sender, batch *client.Batch, reset bool) bool {
-	slog.Debug("sending batch", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
+	slog.Debug("sending batch",
+		"messages", len(batch.Records),
+		"message_bytes", totalMessageBytes(batch.Records),
+		"current_position", batch.CurrentPosition,
+		"next_position", batch.NextPosition,
+		"reset", reset,
+	)
 	req := &models.BatchRequest{
 		Reset:           reset,
 		CurrentPosition: batch.CurrentPosition,
@@ -453,4 +458,12 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 		return true
 	}
 	return false
+}
+
+func totalMessageBytes(records []models.Record) int {
+	total := 0
+	for _, record := range records {
+		total += len(record.Message)
+	}
+	return total
 }

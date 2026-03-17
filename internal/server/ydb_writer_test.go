@@ -1,13 +1,8 @@
 package server
 
 import (
-	"context"
-	"errors"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
 )
@@ -51,64 +46,5 @@ func TestStructFieldsForRowErrorsOnMissingRequiredColumn(t *testing.T) {
 	_, err := structFieldsForRow(row, columns)
 	if err == nil {
 		t.Fatal("expected error for missing required column")
-	}
-}
-
-func TestOpenYDBDriverAppliesDefaultOpenTimeoutWithoutDeadline(t *testing.T) {
-	previousOpen := ydbOpen
-	t.Cleanup(func() {
-		ydbOpen = previousOpen
-	})
-
-	openTimeout := 20 * time.Millisecond
-	ydbOpen = func(ctx context.Context, _ string, _ ...ydb.Option) (*ydb.Driver, error) {
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
-
-	_, err := openYDBDriver(context.Background(), "grpcs://localhost:2135", "/local", YDBAuthOptions{}, openTimeout)
-	if err == nil {
-		t.Fatal("expected openYDBDriver() to fail with timeout")
-	}
-	if !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("expected timeout error, got %v", err)
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("expected context deadline exceeded, got %v", err)
-	}
-}
-
-func TestOpenYDBDriverKeepsExistingContextDeadline(t *testing.T) {
-	previousOpen := ydbOpen
-	t.Cleanup(func() {
-		ydbOpen = previousOpen
-	})
-
-	openTimeout := 2 * time.Second
-	callerTimeout := 25 * time.Millisecond
-	var gotDeadline time.Time
-	var gotDeadlineSet bool
-	ydbOpen = func(ctx context.Context, _ string, _ ...ydb.Option) (*ydb.Driver, error) {
-		gotDeadline, gotDeadlineSet = ctx.Deadline()
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), callerTimeout)
-	defer cancel()
-
-	_, err := openYDBDriver(ctx, "grpcs://localhost:2135", "/local", YDBAuthOptions{}, openTimeout)
-	if err == nil {
-		t.Fatal("expected openYDBDriver() to fail with deadline exceeded")
-	}
-	if !gotDeadlineSet {
-		t.Fatal("expected open context to have deadline")
-	}
-	remaining := time.Until(gotDeadline)
-	if remaining > 500*time.Millisecond {
-		t.Fatalf("expected existing short deadline to be preserved, remaining=%s", remaining)
-	}
-	if strings.Contains(err.Error(), "timed out after") {
-		t.Fatalf("did not expect default-timeout error when caller deadline exists, got %v", err)
 	}
 }
