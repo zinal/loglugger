@@ -147,3 +147,56 @@ func TestRecordParserStandardRegexMultilineAppendsToPMessage(t *testing.T) {
 		t.Fatalf("P_MESSAGE = %q, want %q", got.Parsed["P_MESSAGE"], wantMessage)
 	}
 }
+
+func TestRecordParserStandardRegexParsesYDBExampleMessages(t *testing.T) {
+	parser, err := NewRecordParser(
+		`^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$`,
+		NoMatchSendRaw,
+		"",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		message     string
+		wantService string
+		wantLevel   string
+	}{
+		{
+			name: "pdisk",
+			message: "2026-03-14T18:01:16.753396Z :BS_PDISK NOTICE: {BPD38@blobstorage_pdisk_impl.cpp:2681} OnDriveStartup Path# \"/dev/disk/by-partlabel/ydb_disk_1\" PDiskId# 1",
+			wantService: "BS_PDISK",
+			wantLevel:   "NOTICE",
+		},
+		{
+			name: "columnshard",
+			message: "2026-03-15T11:21:25.954141Z :TX_COLUMNSHARD WARN: tablet_id=72075186224038915;self_id=[50014:7617440977061045175:3144];tablet_id=72075186224038915;process=TTxInitSchema::Execute;fline=abstract.cpp:11;event=normalizer_register;description=CLASS_NAME=RestoreV2Chunks;",
+			wantService: "TX_COLUMNSHARD",
+			wantLevel:   "WARN",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := models.Record{Message: tt.message}
+			got, ok := parser.Parse(rec)
+			if !ok {
+				t.Fatal("Parse() ok = false, want true")
+			}
+			if got.Parsed["P_DTTM"] == "" {
+				t.Fatal("P_DTTM is empty, want timestamp")
+			}
+			if got.Parsed["P_SERVICE"] != tt.wantService {
+				t.Fatalf("P_SERVICE = %q, want %q", got.Parsed["P_SERVICE"], tt.wantService)
+			}
+			if got.Parsed["P_LEVEL"] != tt.wantLevel {
+				t.Fatalf("P_LEVEL = %q, want %q", got.Parsed["P_LEVEL"], tt.wantLevel)
+			}
+			if got.Parsed["P_MESSAGE"] == "" {
+				t.Fatal("P_MESSAGE is empty, want parsed message body")
+			}
+		})
+	}
+}

@@ -100,6 +100,15 @@ func main() {
 		slog.Error("create multiline merger", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("client parser settings",
+		"enabled", parser != nil,
+		"message_regex", strings.TrimSpace(cfg.MessageRegex),
+		"systemd_unit_regex", strings.TrimSpace(cfg.SystemdUnitRegex),
+		"message_regex_no_match", strings.TrimSpace(cfg.MessageNoMatch),
+		"multiline_enabled", multilineMerger != nil,
+		"multiline_timeout", cfg.MultilineTimeout,
+		"multiline_max_messages", cfg.MultilineMaxMessages,
+	)
 
 	ctx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
