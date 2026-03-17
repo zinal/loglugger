@@ -54,10 +54,10 @@ field_mapping:
 	recordTs := int64(1710345600000000)
 	priority := 6
 	row, err := mapper.MapRecord("client-1", models.Record{
-		Parsed:            map[string]string{"P_LEVEL": "INFO", "P_DTTM": "2025-03-13T10:00:00"},
-		Priority:          &priority,
-		RealtimeTimestamp: &recordTs,
-		Fields:            map[string]string{"CODE_LINE": "42"},
+		Parsed:     map[string]string{"P_LEVEL": "INFO", "P_DTTM": "2025-03-13T10:00:00"},
+		Priority:   &priority,
+		RealtimeTS: &recordTs,
+		Fields:     map[string]string{"CODE_LINE": "42"},
 	})
 	if err != nil {
 		t.Fatal(err)

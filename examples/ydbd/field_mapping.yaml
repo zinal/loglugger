@@ -14,10 +14,11 @@ field_mapping:
     destination: seqno
     transform: int64
 
-  # Parsed fields from message regex groups.
-  - source: parsed.P_DTTM
+  # ts_orig comes from client realtime clock (microseconds).
+  - source: realtime_ts
     destination: ts_orig
-    transform: timestamp64
+    transform: timestamp64_us
+  # Parsed fields from message regex groups.
   - source: parsed.P_SERVICE
     destination: service
     default: unknown

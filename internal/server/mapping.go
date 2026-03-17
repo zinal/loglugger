@@ -86,8 +86,8 @@ func (m *mapper) MapRecord(clientID string, rec models.Record) (map[string]inter
 }
 
 func logTimestampMicroseconds(rec models.Record) string {
-	if rec.RealtimeTimestamp != nil {
-		return strconv.FormatInt(*rec.RealtimeTimestamp, 10)
+	if rec.RealtimeTS != nil {
+		return strconv.FormatInt(*rec.RealtimeTS, 10)
 	}
 	return strconv.FormatInt(time.Now().UTC().UnixMicro(), 10)
 }
@@ -102,12 +102,11 @@ func messageCityHash64(rec models.Record) (string, error) {
 
 func fullMessageBytes(rec models.Record) ([]byte, error) {
 	payload := map[string]interface{}{
-		"message":             rec.Message,
-		"syslog_identifier":   rec.SyslogIdentifier,
-		"systemd_unit":        rec.SystemdUnit,
-		"realtime_timestamp":  rec.RealtimeTimestamp,
-		"monotonic_timestamp": rec.MonotonicTimestamp,
-		"priority":            rec.Priority,
+		"message":           rec.Message,
+		"syslog_identifier": rec.SyslogIdentifier,
+		"systemd_unit":      rec.SystemdUnit,
+		"realtime_ts":       rec.RealtimeTS,
+		"priority":          rec.Priority,
 	}
 	if rec.SeqNo != nil {
 		payload["seqno"] = rec.SeqNo

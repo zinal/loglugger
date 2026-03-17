@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ydb-platform/loglugger/internal/models"
 )
@@ -174,6 +175,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 	}
 
 	if req.Reset {
+		positionUpdate := positionUpdateFromRecords(req.Records)
 		slog.Info("reset batch received from client", "client_id", req.ClientID, "next_position", req.NextPosition, "records", len(req.Records))
 		if len(req.Records) > 0 {
 			rows, err := h.mapRecords(req.ClientID, req.Records)
@@ -184,7 +186,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 				return h.batchStorageError("bulk_upsert", req.ClientID, err)
 			}
 		}
-		if err := h.writer.SetPositionUnconditional(ctx, req.ClientID, req.NextPosition); err != nil {
+		if err := h.writer.SetPositionUnconditional(ctx, req.ClientID, req.NextPosition, positionUpdate); err != nil {
 			return h.batchStorageError("set_position_unconditional", req.ClientID, err)
 		}
 		return &models.BatchResponse{Status: "ok", NextPosition: req.NextPosition}
@@ -219,7 +221,7 @@ func (h *Handler) handle(ctx context.Context, req *models.BatchRequest) *models.
 			return h.batchStorageError("bulk_upsert", req.ClientID, err)
 		}
 	}
-	if err := h.writer.SetPosition(ctx, req.ClientID, expected, req.NextPosition); err != nil {
+	if err := h.writer.SetPosition(ctx, req.ClientID, expected, req.NextPosition, positionUpdateFromRecords(req.Records)); err != nil {
 		if resp := h.positionMismatchResponse(req.ClientID, err); resp != nil {
 			return resp
 		}
@@ -275,6 +277,27 @@ func (h *Handler) mapRecords(clientID string, records []models.Record) ([]map[st
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+func positionUpdateFromRecords(records []models.Record) PositionUpdate {
+	update := PositionUpdate{
+		TSWall: time.Now().UTC(),
+	}
+	for i := range records {
+		rec := records[i]
+		if rec.SeqNo != nil && (update.MaxSeqNo == nil || *rec.SeqNo > *update.MaxSeqNo) {
+			maxSeqNo := *rec.SeqNo
+			update.MaxSeqNo = &maxSeqNo
+		}
+		if rec.RealtimeTS != nil {
+			tsOrig := time.UnixMicro(*rec.RealtimeTS).UTC()
+			if update.MaxTSOrig == nil || tsOrig.After(*update.MaxTSOrig) {
+				maxTSOrig := tsOrig
+				update.MaxTSOrig = &maxTSOrig
+			}
+		}
+	}
+	return update
 }
 
 func (h *Handler) writeResponse(w http.ResponseWriter, resp *models.BatchResponse) {

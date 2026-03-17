@@ -205,8 +205,7 @@ Content-Type: application/json
       "priority": "int",
       "syslog_identifier": "string",
       "systemd_unit": "string",
-      "realtime_timestamp": "int64",
-      "monotonic_timestamp": "uint64",
+      "realtime_ts": "int64",
       "fields": {}                 // Optional. Additional journal fields.
     }
   ]
@@ -296,7 +295,7 @@ The server uses a **configurable mapping** between source fields (from the clien
 
 - **Mapping schema**: A list of mappings, each specifying:
   - **Source**: Field path in the incoming record. May be:
-    - Top-level: `message`, `seqno`, `priority`, `syslog_identifier`, `systemd_unit`, `realtime_timestamp`, `monotonic_timestamp`
+    - Top-level: `message`, `seqno`, `priority`, `syslog_identifier`, `systemd_unit`, `realtime_ts`
     - Computed by mapper: `log_timestamp_us`, `message_cityhash64`
     - Parsed: `parsed.P_DTTM`, `parsed.P_SERVICE`, `parsed.P_LEVEL`, `parsed.P_MESSAGE`
     - Nested in `fields`: `fields.CODE_FILE`, `fields.CODE_LINE`
@@ -315,9 +314,9 @@ field_mapping:
   - source: message_cityhash64
     destination: message_hash
     transform: uint64
-  - source: parsed.P_DTTM
+  - source: realtime_ts
     destination: ts_orig
-    transform: timestamp64
+    transform: timestamp64_us
   - source: parsed.P_SERVICE
     destination: service_name
   - source: parsed.P_LEVEL
@@ -366,13 +365,12 @@ Each record contains raw `message`. Parsing results may also be sent by client i
 | priority | int | No | Syslog priority (0–7) |
 | syslog_identifier | string | No | Syslog identifier |
 | systemd_unit | string | No | systemd unit name |
-| realtime_timestamp | int64 | No | Microseconds since epoch |
-| monotonic_timestamp | uint64 | No | Monotonic clock value |
+| realtime_ts | int64 | No | Microseconds since epoch |
 | fields | map[string]string | No | Additional journal fields |
 
 ### 6.2 Position Format
 
-- **Recommendation**: Use journald cursor string when available, or a composite of `(monotonic_timestamp, offset)` encoded as a string (e.g., `base64` or `monotonic:offset`).
+- **Recommendation**: Use journald cursor string when available.
 - **Opaque**: The server treats position as an opaque string; no parsing required for validation (equality check only).
 
 ---
@@ -577,8 +575,7 @@ Each configured attribute is provided as a list. The certificate subject value m
       "priority": 6,
       "syslog_identifier": "nginx",
       "systemd_unit": "nginx.service",
-      "realtime_timestamp": 1710345600000000,
-      "monotonic_timestamp": 12345678,
+      "realtime_ts": 1710345600000000,
       "fields": {}
     }
   ]

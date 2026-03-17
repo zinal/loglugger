@@ -21,7 +21,6 @@ type journalReader struct {
 	cfg            JournalConfig
 	last           string
 	lastRealtime   uint64
-	lastMonotonic  uint64
 	exactMatch     string
 	pending        []*JournalEntry
 	serviceMatcher serviceMatcher
@@ -75,7 +74,6 @@ func (r *journalReader) SeekToPosition(ctx context.Context, position string) err
 		}
 		r.last = ""
 		r.lastRealtime = 0
-		r.lastMonotonic = 0
 		r.pending = nil
 		return nil
 	}
@@ -94,35 +92,34 @@ func (r *journalReader) Next(ctx context.Context) (*JournalEntry, error) {
 		r.pending = r.pending[1:]
 		return entry, nil
 	}
-	entry, nextCursor, nextRealtime, nextMonotonic, err := r.readNext(ctx, r.j, r.last)
+	entry, nextCursor, nextRealtime, err := r.readNext(ctx, r.j, r.last)
 	if err != nil {
 		return nil, err
 	}
 	if entry != nil {
 		r.last = nextCursor
 		r.lastRealtime = nextRealtime
-		r.lastMonotonic = nextMonotonic
 	}
 	return entry, nil
 }
 
-func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last string) (*JournalEntry, string, uint64, uint64, error) {
+func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last string) (*JournalEntry, string, uint64, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, "", 0, 0, ctx.Err()
+			return nil, "", 0, ctx.Err()
 		default:
 		}
 		n, err := j.Next()
 		if err != nil {
-			return nil, "", 0, 0, err
+			return nil, "", 0, err
 		}
 		if n == 0 {
-			return nil, last, r.lastRealtime, r.lastMonotonic, nil
+			return nil, last, r.lastRealtime, nil
 		}
 		entry, err := j.GetEntry()
 		if err != nil {
-			return nil, "", 0, 0, fmt.Errorf("get entry: %w", err)
+			return nil, "", 0, fmt.Errorf("get entry: %w", err)
 		}
 		rec := journalEntryToRecord(entry)
 		if !r.serviceMatcher.Match(rec.SystemdUnit) {
@@ -135,14 +132,10 @@ func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last
 			continue
 		}
 		nextRealtime := entry.RealtimeTimestamp
-		if rec.RealtimeTimestamp != nil && *rec.RealtimeTimestamp >= 0 {
-			nextRealtime = uint64(*rec.RealtimeTimestamp)
+		if rec.RealtimeTS != nil && *rec.RealtimeTS >= 0 {
+			nextRealtime = uint64(*rec.RealtimeTS)
 		}
-		nextMonotonic := entry.MonotonicTimestamp
-		if rec.MonotonicTimestamp != nil {
-			nextMonotonic = *rec.MonotonicTimestamp
-		}
-		return &JournalEntry{Record: rec, Position: last, Cursor: entry.Cursor}, entry.Cursor, nextRealtime, nextMonotonic, nil
+		return &JournalEntry{Record: rec, Position: last, Cursor: entry.Cursor}, entry.Cursor, nextRealtime, nil
 	}
 }
 
@@ -152,10 +145,9 @@ func (r *journalReader) Recover(ctx context.Context) (bool, error) {
 	}
 	previousCursor := r.last
 	previousRealtime := r.lastRealtime
-	previousMonotonic := r.lastMonotonic
 	cursorErr := r.recoverFromCursor(ctx)
 	if cursorErr == nil {
-		r.prependRecoveryMessage(previousCursor, previousRealtime, previousMonotonic)
+		r.prependRecoveryMessage(previousCursor, previousRealtime)
 		return true, nil
 	}
 	if r.lastRealtime == 0 {
@@ -165,7 +157,7 @@ func (r *journalReader) Recover(ctx context.Context) (bool, error) {
 	if realtimeErr != nil {
 		return false, fmt.Errorf("resume from last known cursor failed: %w; resume after the last good timestamp failed: %w", cursorErr, realtimeErr)
 	}
-	r.prependRecoveryMessage(previousCursor, previousRealtime, previousMonotonic)
+	r.prependRecoveryMessage(previousCursor, previousRealtime)
 	return true, nil
 }
 
@@ -203,7 +195,7 @@ func (r *journalReader) recoverFromRealtime(ctx context.Context) error {
 }
 
 func (r *journalReader) swapRecoveredJournal(ctx context.Context, j *sdjournal.Journal, last string) error {
-	entry, nextCursor, nextRealtime, nextMonotonic, err := r.readNext(ctx, j, last)
+	entry, nextCursor, nextRealtime, err := r.readNext(ctx, j, last)
 	if err != nil {
 		j.Close()
 		return err
@@ -222,25 +214,20 @@ func (r *journalReader) swapRecoveredJournal(ctx context.Context, j *sdjournal.J
 	if entry != nil {
 		r.last = nextCursor
 		r.lastRealtime = nextRealtime
-		r.lastMonotonic = nextMonotonic
 	}
 	return nil
 }
 
-func (r *journalReader) prependRecoveryMessage(position string, realtimeUsec, monotonicUsec uint64) {
-	entry := newRecoveryJournalEntry(position, realtimeUsec, monotonicUsec)
+func (r *journalReader) prependRecoveryMessage(position string, realtimeUsec uint64) {
+	entry := newRecoveryJournalEntry(position, realtimeUsec)
 	r.pending = append([]*JournalEntry{entry}, r.pending...)
 }
 
-func newRecoveryJournalEntry(position string, realtimeUsec, monotonicUsec uint64) *JournalEntry {
+func newRecoveryJournalEntry(position string, realtimeUsec uint64) *JournalEntry {
 	const criticalPriority = 2
 	eventRealtime := int64(realtimeUsec)
 	if eventRealtime > 0 {
 		eventRealtime += 1000
-	}
-	eventMonotonic := monotonicUsec
-	if eventMonotonic > 0 {
-		eventMonotonic += 1000
 	}
 	message := recoveryLogMessage(eventRealtime)
 	if message == "" {
@@ -258,10 +245,7 @@ func newRecoveryJournalEntry(position string, realtimeUsec, monotonicUsec uint64
 		},
 	}
 	if eventRealtime > 0 {
-		record.RealtimeTimestamp = &eventRealtime
-	}
-	if eventMonotonic > 0 {
-		record.MonotonicTimestamp = &eventMonotonic
+		record.RealtimeTS = &eventRealtime
 	}
 	return &JournalEntry{
 		Record:   record,
@@ -293,24 +277,16 @@ func journalEntryToRecord(e *sdjournal.JournalEntry) models.Record {
 	rec.SystemdUnit = e.Fields["_SYSTEMD_UNIT"]
 	if v, ok := e.Fields["__REALTIME_TIMESTAMP"]; ok {
 		if t, err := strconv.ParseInt(v, 10, 64); err == nil {
-			rec.RealtimeTimestamp = &t
+			rec.RealtimeTS = &t
 		}
 	}
-	if v, ok := e.Fields["__MONOTONIC_TIMESTAMP"]; ok {
-		if t, err := strconv.ParseUint(v, 10, 64); err == nil {
-			rec.MonotonicTimestamp = &t
-		}
-	}
-	if rec.RealtimeTimestamp == nil {
+	if rec.RealtimeTS == nil {
 		t := int64(e.RealtimeTimestamp)
-		rec.RealtimeTimestamp = &t
-	}
-	if rec.MonotonicTimestamp == nil {
-		rec.MonotonicTimestamp = &e.MonotonicTimestamp
+		rec.RealtimeTS = &t
 	}
 	for k, v := range e.Fields {
 		if k != "MESSAGE" && k != "PRIORITY" && k != "SYSLOG_IDENTIFIER" &&
-			k != "_SYSTEMD_UNIT" && k != "__REALTIME_TIMESTAMP" && k != "__MONOTONIC_TIMESTAMP" {
+			k != "_SYSTEMD_UNIT" && k != "__REALTIME_TIMESTAMP" {
 			rec.Fields[k] = v
 		}
 	}

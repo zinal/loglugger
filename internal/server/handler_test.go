@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ydb-platform/loglugger/internal/models"
 )
@@ -64,12 +65,19 @@ func TestHandler_ResetBatch(t *testing.T) {
 func TestHandler_ResetBatchSkipsPositionValidation(t *testing.T) {
 	writer := &resetWriterSpy{}
 	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), writer, "logs")
+	seq1 := int64(100)
+	seq2 := int64(200)
+	ts1 := int64(5000)
+	ts2 := int64(4000)
 
 	resp := handler.handle(context.Background(), &models.BatchRequest{
 		ClientID:     "client-1",
 		Reset:        true,
 		NextPosition: "pos-1",
-		Records:      []models.Record{{Message: "hello"}},
+		Records: []models.Record{
+			{Message: "hello", SeqNo: &seq1, RealtimeTS: &ts1},
+			{Message: "world", SeqNo: &seq2, RealtimeTS: &ts2},
+		},
 	})
 
 	if resp.Status != "ok" {
@@ -84,13 +92,43 @@ func TestHandler_ResetBatchSkipsPositionValidation(t *testing.T) {
 	if !writer.setUnconditionalCalled {
 		t.Fatal("reset batch should use unconditional position update")
 	}
+	if writer.unconditionalUpdate.MaxSeqNo == nil || *writer.unconditionalUpdate.MaxSeqNo != seq2 {
+		t.Fatalf("max seqno = %v, want %d", writer.unconditionalUpdate.MaxSeqNo, seq2)
+	}
+	if writer.unconditionalUpdate.MaxTSOrig == nil || !writer.unconditionalUpdate.MaxTSOrig.Equal(time.UnixMicro(ts1).UTC()) {
+		t.Fatalf("max ts_orig = %v, want %v", writer.unconditionalUpdate.MaxTSOrig, time.UnixMicro(ts1).UTC())
+	}
+	if writer.unconditionalUpdate.TSWall.IsZero() {
+		t.Fatal("ts_wall must be set")
+	}
+}
+
+func TestPositionUpdateFromRecords_MaxValues(t *testing.T) {
+	seq1 := int64(3)
+	seq2 := int64(9)
+	ts1 := int64(17)
+	ts2 := int64(12)
+	update := positionUpdateFromRecords([]models.Record{
+		{Message: "a", SeqNo: &seq1, RealtimeTS: &ts1},
+		{Message: "b", SeqNo: &seq2, RealtimeTS: &ts2},
+	})
+
+	if update.MaxSeqNo == nil || *update.MaxSeqNo != seq2 {
+		t.Fatalf("max seqno = %v, want %d", update.MaxSeqNo, seq2)
+	}
+	if update.MaxTSOrig == nil || !update.MaxTSOrig.Equal(time.UnixMicro(ts1).UTC()) {
+		t.Fatalf("max ts_orig = %v, want %v", update.MaxTSOrig, time.UnixMicro(ts1).UTC())
+	}
+	if update.TSWall.IsZero() {
+		t.Fatal("ts_wall must be set")
+	}
 }
 
 func TestHandler_PositionMismatch(t *testing.T) {
 	ctx := context.Background()
 	mapper := NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}})
 	writer := NewMockWriter()
-	_ = writer.SetPosition(ctx, "client-1", "", "expected-pos")
+	_ = writer.SetPosition(ctx, "client-1", "", "expected-pos", PositionUpdate{})
 	handler := NewHandler(mapper, writer, "logs")
 
 	req := &models.BatchRequest{
@@ -228,7 +266,7 @@ func TestHandler_FieldMappingParsed(t *testing.T) {
 func TestHandler_GetPositionFound(t *testing.T) {
 	ctx := context.Background()
 	writer := NewMockWriter()
-	_ = writer.SetPosition(ctx, "client-1", "", "cursor-9")
+	_ = writer.SetPosition(ctx, "client-1", "", "cursor-9", PositionUpdate{})
 	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), writer, "logs")
 
 	w := httptest.NewRecorder()
@@ -631,7 +669,7 @@ func (w errorWriter) GetPosition(ctx context.Context, clientID string) (string, 
 	return position, ok, nil
 }
 
-func (w errorWriter) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
+func (w errorWriter) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string, update PositionUpdate) error {
 	current, ok := w.positions[clientID]
 	if current != expectedPosition {
 		return &PositionMismatchError{CurrentPosition: current, Found: ok}
@@ -640,7 +678,7 @@ func (w errorWriter) SetPosition(ctx context.Context, clientID, expectedPosition
 	return nil
 }
 
-func (w errorWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string) error {
+func (w errorWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string, update PositionUpdate) error {
 	w.positions[clientID] = nextPosition
 	return nil
 }
@@ -661,11 +699,11 @@ func (s positionWriterStub) GetPosition(ctx context.Context, clientID string) (s
 	return s.getPos, s.getOK, s.getErr
 }
 
-func (s positionWriterStub) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
+func (s positionWriterStub) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string, update PositionUpdate) error {
 	return s.setErr
 }
 
-func (s positionWriterStub) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string) error {
+func (s positionWriterStub) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string, update PositionUpdate) error {
 	return s.resetErr
 }
 
@@ -673,6 +711,8 @@ type resetWriterSpy struct {
 	getCalled              bool
 	setCalled              bool
 	setUnconditionalCalled bool
+	conditionalUpdate      PositionUpdate
+	unconditionalUpdate    PositionUpdate
 }
 
 func (w *resetWriterSpy) BulkUpsert(ctx context.Context, table string, rows []map[string]interface{}) error {
@@ -684,12 +724,14 @@ func (w *resetWriterSpy) GetPosition(ctx context.Context, clientID string) (stri
 	return "pos-old", true, nil
 }
 
-func (w *resetWriterSpy) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string) error {
+func (w *resetWriterSpy) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string, update PositionUpdate) error {
 	w.setCalled = true
+	w.conditionalUpdate = update
 	return &PositionMismatchError{CurrentPosition: "pos-new", Found: true}
 }
 
-func (w *resetWriterSpy) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string) error {
+func (w *resetWriterSpy) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string, update PositionUpdate) error {
 	w.setUnconditionalCalled = true
+	w.unconditionalUpdate = update
 	return nil
 }

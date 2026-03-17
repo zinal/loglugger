@@ -156,7 +156,10 @@ go test ./...
 ```sql
 CREATE TABLE `loglugger_positions` (
   client_id Utf8 NOT NULL,
-  expected_position Utf8 NOT NULL,
+  exp_pos Utf8 NOT NULL,
+  ts_wall Timestamp64 NOT NULL,
+  seqno Int64,
+  ts_orig Timestamp64,
   PRIMARY KEY (client_id)
 );
 ```
@@ -178,8 +181,8 @@ CREATE TABLE `loglugger_positions` (
 
 - В `examples/ydbd/target_table.sql` столбцы `log_timestamp_us` и `ts_orig` имеют тип `Timestamp64`.
 - В `examples/ydbd/field_mapping.yaml` используйте:
-  - `transform: timestamp64_us` для времени эпохи Unix в микросекундах (например, `log_timestamp_us`)
-  - `transform: timestamp64` для строковых значений даты и времени (например, `parsed.P_DTTM` -> `ts_orig`)
+  - `transform: timestamp64` для строковых даты/времени (например, `parsed.P_DTTM` -> `ts_orig` в кастомных полях)
+  - `transform: timestamp64_us` для Unix timestamps в микросекундах (например, `log_timestamp_us`, `realtime_ts` -> `ts_orig`)
 - Опция сервера `convert_time_to_local_tz` (по умолчанию `false`) управляет разбором значений `timestamp64` без таймзоны:
   - `false`: интерпретация как UTC
   - `true`: интерпретация в локальной таймзоне ОС перед сохранением (полезно, но рискованно при различающейся конфигурации часовых поясов на хостах)

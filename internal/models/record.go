@@ -5,15 +5,14 @@ import "strconv"
 // Record represents a log record sent from client to server.
 // Parsed fields are produced by the client parser and sent over protocol.
 type Record struct {
-	Message            string            `json:"message,omitempty"`
-	Parsed             map[string]string `json:"parsed,omitempty"`
-	SeqNo              *int64            `json:"seqno,omitempty"`
-	Priority           *int              `json:"priority,omitempty"`
-	SyslogIdentifier   string            `json:"syslog_identifier,omitempty"`
-	SystemdUnit        string            `json:"systemd_unit,omitempty"`
-	RealtimeTimestamp  *int64            `json:"realtime_timestamp,omitempty"`
-	MonotonicTimestamp *uint64           `json:"monotonic_timestamp,omitempty"`
-	Fields             map[string]string `json:"fields,omitempty"`
+	Message          string            `json:"message,omitempty"`
+	Parsed           map[string]string `json:"parsed,omitempty"`
+	SeqNo            *int64            `json:"seqno,omitempty"`
+	Priority         *int              `json:"priority,omitempty"`
+	SyslogIdentifier string            `json:"syslog_identifier,omitempty"`
+	SystemdUnit      string            `json:"systemd_unit,omitempty"`
+	RealtimeTS       *int64            `json:"realtime_ts,omitempty"`
+	Fields           map[string]string `json:"fields,omitempty"`
 }
 
 // HasParsed returns true if the record has parsed fields.
@@ -38,14 +37,9 @@ func (r *Record) GetField(path string) (string, bool) {
 		return r.SyslogIdentifier, r.SyslogIdentifier != ""
 	case "systemd_unit":
 		return r.SystemdUnit, r.SystemdUnit != ""
-	case "realtime_timestamp":
-		if r.RealtimeTimestamp != nil {
-			return fmtInt64(*r.RealtimeTimestamp), true
-		}
-		return "", false
-	case "monotonic_timestamp":
-		if r.MonotonicTimestamp != nil {
-			return fmtUint64(*r.MonotonicTimestamp), true
+	case "realtime_ts":
+		if r.RealtimeTS != nil {
+			return fmtInt64(*r.RealtimeTS), true
 		}
 		return "", false
 	case "priority":
@@ -73,10 +67,6 @@ func (r *Record) GetField(path string) (string, bool) {
 
 func fmtInt64(n int64) string {
 	return strconv.FormatInt(n, 10)
-}
-
-func fmtUint64(n uint64) string {
-	return strconv.FormatUint(n, 10)
 }
 
 func fmtInt(n int) string {

@@ -156,7 +156,10 @@ Create the YDB table for the position store before starting the server with `wri
 ```sql
 CREATE TABLE `loglugger_positions` (
   client_id Utf8 NOT NULL,
-  expected_position Utf8 NOT NULL,
+  exp_pos Utf8 NOT NULL,
+  ts_wall Timestamp64 NOT NULL,
+  seqno Int64,
+  ts_orig Timestamp64,
   PRIMARY KEY (client_id)
 );
 ```
@@ -178,8 +181,8 @@ Notes on YDB schema and mapping:
 
 - In `examples/ydbd/target_table.sql`, `log_timestamp_us` and `ts_orig` use `Timestamp64`.
 - In `examples/ydbd/field_mapping.yaml`, use:
-  - `transform: timestamp64_us` for microsecond epoch values (e.g., `log_timestamp_us`)
-  - `transform: timestamp64` for parsed datetime strings (e.g., `parsed.P_DTTM` -> `ts_orig`)
+  - `transform: timestamp64_us` for microsecond Unix timestamps (e.g., `log_timestamp_us`, `realtime_ts` -> `ts_orig`)
+  - `transform: timestamp64` for datetime strings (e.g., `parsed.P_DTTM` -> `ts_orig` in custom mappings)
 - `convert_time_to_local_tz` (server config, default `false`) changes how timezone-less `timestamp64` values are parsed:
   - `false`: interpret as UTC
   - `true`: interpret in the OS local timezone before saving (useful, but risky when timezone configuration differs across hosts)
