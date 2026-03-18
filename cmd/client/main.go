@@ -133,6 +133,10 @@ func main() {
 
 	flushTicker := time.NewTicker(cfg.BatchTimeout)
 	defer flushTicker.Stop()
+	const (
+		resumeLogMinEmptyReads = 10
+		resumeLogMinEmptyFor   = 2 * time.Second
+	)
 	emptyReads := 0
 	var emptySince time.Time
 	processEntry := func(entry *client.JournalEntry) {
@@ -219,11 +223,17 @@ func main() {
 			continue
 		}
 		if emptyReads > 0 {
-			attrs := []any{"empty_reads", emptyReads}
+			emptyFor := time.Duration(0)
 			if !emptySince.IsZero() {
-				attrs = append(attrs, "empty_for", time.Since(emptySince))
+				emptyFor = time.Since(emptySince)
 			}
-			slog.Debug("journal resumed with new entries", attrs...)
+			if emptyReads >= resumeLogMinEmptyReads || emptyFor >= resumeLogMinEmptyFor {
+				attrs := []any{"empty_reads", emptyReads}
+				if emptyFor > 0 {
+					attrs = append(attrs, "empty_for", emptyFor)
+				}
+				slog.Debug("journal resumed with new entries", attrs...)
+			}
 			emptyReads = 0
 			emptySince = time.Time{}
 		}
