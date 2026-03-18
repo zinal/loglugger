@@ -117,7 +117,20 @@ func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last
 			return nil, "", 0, err
 		}
 		if n == 0 {
-			return nil, last, r.lastRealtime, nil
+			// When we are at the tail, ask journald for append/invalidate events.
+			// Without this, Next() can keep returning 0 even after new entries arrive.
+			status := j.Wait(100 * time.Millisecond)
+			switch status {
+			case sdjournal.SD_JOURNAL_APPEND, sdjournal.SD_JOURNAL_INVALIDATE:
+				continue
+			case sdjournal.SD_JOURNAL_NOP:
+				return nil, last, r.lastRealtime, nil
+			default:
+				if status < 0 {
+					return nil, "", 0, fmt.Errorf("wait for journal updates: status=%d", status)
+				}
+				return nil, last, r.lastRealtime, nil
+			}
 		}
 		entry, err := j.GetEntry()
 		if err != nil {
