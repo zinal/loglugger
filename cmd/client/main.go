@@ -134,6 +134,7 @@ func main() {
 	flushTicker := time.NewTicker(cfg.BatchTimeout)
 	defer flushTicker.Stop()
 	emptyReads := 0
+	var emptySince time.Time
 	processEntry := func(entry *client.JournalEntry) {
 		if entry == nil {
 			return
@@ -207,7 +208,10 @@ func main() {
 		}
 		if entry == nil {
 			emptyReads++
-			if emptyReads == 1 || emptyReads%100 == 0 {
+			if emptyReads == 1 {
+				emptySince = time.Now()
+			}
+			if emptyReads%100 == 0 {
 				slog.Debug("journal has no new entries", "empty_reads", emptyReads)
 			}
 			drainExpiredMultiline(time.Now())
@@ -215,8 +219,13 @@ func main() {
 			continue
 		}
 		if emptyReads > 0 {
-			slog.Debug("journal resumed with new entries", "empty_reads", emptyReads)
+			attrs := []any{"empty_reads", emptyReads}
+			if !emptySince.IsZero() {
+				attrs = append(attrs, "empty_for", time.Since(emptySince))
+			}
+			slog.Debug("journal resumed with new entries", attrs...)
 			emptyReads = 0
+			emptySince = time.Time{}
 		}
 
 		if multilineMerger != nil {
