@@ -122,64 +122,6 @@ func TestMapper_MessageHashStableForSameRecord(t *testing.T) {
 	}
 }
 
-func TestMapper_TimestampWithoutZoneUsesLocalWhenEnabled(t *testing.T) {
-	original := time.Local
-	local := time.FixedZone("LOCAL+03", 3*60*60)
-	time.Local = local
-	t.Cleanup(func() { time.Local = original })
-
-	mapper := NewMapperWithOptions([]FieldMapping{
-		{Source: "parsed.P_DTTM", Destination: "ts_orig", Transform: "timestamp64"},
-	}, MapperOptions{ConvertTimeToLocalTZ: true})
-
-	row, err := mapper.MapRecord("client-1", models.Record{
-		Parsed: map[string]string{"P_DTTM": "2025-03-13T10:00:00"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ts, ok := row["ts_orig"].(time.Time)
-	if !ok {
-		t.Fatalf("ts_orig = %#v, want time.Time", row["ts_orig"])
-	}
-	if ts.Location().String() != local.String() {
-		t.Fatalf("ts_orig location = %q, want %q", ts.Location(), local)
-	}
-	if ts.UTC().Format("2006-01-02T15:04:05") != "2025-03-13T07:00:00" {
-		t.Fatalf("ts_orig UTC = %s, want 2025-03-13T07:00:00", ts.UTC().Format("2006-01-02T15:04:05"))
-	}
-}
-
-func TestMapper_TimestampWithZoneConvertedToLocalWhenEnabled(t *testing.T) {
-	original := time.Local
-	local := time.FixedZone("LOCAL+03", 3*60*60)
-	time.Local = local
-	t.Cleanup(func() { time.Local = original })
-
-	mapper := NewMapperWithOptions([]FieldMapping{
-		{Source: "parsed.P_DTTM", Destination: "ts_orig", Transform: "timestamp64"},
-	}, MapperOptions{ConvertTimeToLocalTZ: true})
-
-	row, err := mapper.MapRecord("client-1", models.Record{
-		Parsed: map[string]string{"P_DTTM": "2025-03-13T10:00:00Z"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ts, ok := row["ts_orig"].(time.Time)
-	if !ok {
-		t.Fatalf("ts_orig = %#v, want time.Time", row["ts_orig"])
-	}
-	if ts.Location().String() != local.String() {
-		t.Fatalf("ts_orig location = %q, want %q", ts.Location(), local)
-	}
-	if ts.UTC().Format("2006-01-02T15:04:05") != "2025-03-13T10:00:00" {
-		t.Fatalf("ts_orig UTC = %s, want 2025-03-13T10:00:00", ts.UTC().Format("2006-01-02T15:04:05"))
-	}
-}
-
 func TestQuoteYDBPath(t *testing.T) {
 	got := quoteYDBPath("/local/path`withtick")
 	want := "`/local/path_withtick`"

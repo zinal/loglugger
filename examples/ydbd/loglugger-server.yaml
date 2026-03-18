@@ -7,9 +7,6 @@ max_compressed_body_bytes: 8388608
 max_decompressed_body_bytes: 33554432
 position_table: "loglugger_positions"
 field_mapping_file: "/opt/ydb/loglugger/config/field_mapping.yaml"
-# Parse timezone-less timestamps using OS local timezone before saving.
-# Useful for local-time log formats, but dangerous if hosts/timezones are inconsistent.
-convert_time_to_local_tz: true
 
 # YDB destination settings.
 ydb_endpoint: "grpcs://localhost:2135"

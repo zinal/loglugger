@@ -183,8 +183,6 @@ Notes on YDB schema and mapping:
 - In `examples/ydbd/field_mapping.yaml`, use:
   - `transform: timestamp64_us` for microsecond Unix timestamps (e.g., `log_timestamp_us`, `realtime_ts` -> `ts_orig`)
   - `transform: timestamp64` for datetime strings (e.g., `parsed.P_DTTM` -> `ts_orig` in custom mappings)
-- `convert_time_to_local_tz` (server config, default `false`) changes how timezone-less `timestamp64` values are parsed:
-  - `false`: interpret as UTC
-  - `true`: interpret in the OS local timezone before saving (useful, but risky when timezone configuration differs across hosts)
+- Timezone-less values passed through `transform: timestamp64` are interpreted as UTC.
 - `message_regex`, `systemd_unit_regex`, and `message_regex_no_match` are configured on the client in YAML/JSON configuration.
 - Named groups from both regexes are merged into the same `parsed.*` namespace and can be used by field mapping.

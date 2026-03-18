@@ -183,8 +183,6 @@ CREATE TABLE `loglugger_positions` (
 - В `examples/ydbd/field_mapping.yaml` используйте:
   - `transform: timestamp64` для строковых даты/времени (например, `parsed.P_DTTM` -> `ts_orig` в кастомных полях)
   - `transform: timestamp64_us` для Unix timestamps в микросекундах (например, `log_timestamp_us`, `realtime_ts` -> `ts_orig`)
-- Опция сервера `convert_time_to_local_tz` (по умолчанию `false`) управляет разбором значений `timestamp64` без таймзоны:
-  - `false`: интерпретация как UTC
-  - `true`: интерпретация в локальной таймзоне ОС перед сохранением (полезно, но рискованно при различающейся конфигурации часовых поясов на хостах)
+- Значения без таймзоны при `transform: timestamp64` интерпретируются как UTC.
 - Параметры `message_regex`, `systemd_unit_regex` и `message_regex_no_match` задаются на клиенте, в YAML/JSON-конфигурации.
 - Именованные группы из обоих regex объединяются в одном пространстве `parsed.*` и доступны при настройке записи полей в базу данных.

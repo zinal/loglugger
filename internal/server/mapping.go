@@ -25,28 +25,14 @@ type Mapper interface {
 	MapRecord(clientID string, rec models.Record) (map[string]interface{}, error)
 }
 
-// MapperOptions controls additional mapping behaviors.
-type MapperOptions struct {
-	// ConvertTimeToLocalTZ converts parsed timestamp64 values to OS local timezone before saving.
-	// This is useful when source timestamps are expected in local wall-clock time, but dangerous if misconfigured.
-	ConvertTimeToLocalTZ bool
-}
-
 type mapper struct {
-	mappings             []FieldMapping
-	convertTimeToLocalTZ bool
+	mappings []FieldMapping
 }
 
 // NewMapper creates a mapper from field mappings.
 func NewMapper(mappings []FieldMapping) Mapper {
-	return NewMapperWithOptions(mappings, MapperOptions{})
-}
-
-// NewMapperWithOptions creates a mapper from field mappings and options.
-func NewMapperWithOptions(mappings []FieldMapping, opts MapperOptions) Mapper {
 	return &mapper{
-		mappings:             mappings,
-		convertTimeToLocalTZ: opts.ConvertTimeToLocalTZ,
+		mappings: mappings,
 	}
 }
 
@@ -76,7 +62,7 @@ func (m *mapper) MapRecord(clientID string, rec models.Record) (map[string]inter
 		if !ok {
 			continue
 		}
-		value, err := applyTransform(v, fm.Transform, m.convertTimeToLocalTZ)
+		value, err := applyTransform(v, fm.Transform)
 		if err != nil {
 			return nil, fmt.Errorf("map %s -> %s: %w", fm.Source, fm.Destination, err)
 		}
@@ -133,7 +119,7 @@ func stableStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func applyTransform(value string, transform string, convertTimeToLocalTZ bool) (interface{}, error) {
+func applyTransform(value string, transform string) (interface{}, error) {
 	switch strings.TrimSpace(transform) {
 	case "", "string":
 		return value, nil
@@ -178,31 +164,18 @@ func applyTransform(value string, transform string, convertTimeToLocalTZ bool) (
 		if err != nil {
 			return nil, err
 		}
-		ts := time.UnixMicro(us).UTC()
-		if convertTimeToLocalTZ {
-			ts = ts.In(time.Local)
-		}
-		return ts, nil
+		return time.UnixMicro(us).UTC(), nil
 	case "timestamp64":
-		return parseTimestamp64(strings.TrimSpace(value), convertTimeToLocalTZ)
+		return parseTimestamp64(strings.TrimSpace(value))
 	default:
 		return nil, fmt.Errorf("unsupported transform %q", transform)
 	}
 }
 
-func parseTimestamp64(value string, convertTimeToLocalTZ bool) (time.Time, error) {
+func parseTimestamp64(value string) (time.Time, error) {
 	// Numeric input is interpreted as microseconds since Unix epoch.
 	if us, err := strconv.ParseInt(value, 10, 64); err == nil {
-		ts := time.UnixMicro(us).UTC()
-		if convertTimeToLocalTZ {
-			ts = ts.In(time.Local)
-		}
-		return ts, nil
-	}
-
-	location := time.UTC
-	if convertTimeToLocalTZ {
-		location = time.Local
+		return time.UnixMicro(us).UTC(), nil
 	}
 
 	withZone := []string{
@@ -213,9 +186,6 @@ func parseTimestamp64(value string, convertTimeToLocalTZ bool) (time.Time, error
 	}
 	for _, layout := range withZone {
 		if ts, err := time.Parse(layout, value); err == nil {
-			if convertTimeToLocalTZ {
-				ts = ts.In(time.Local)
-			}
 			return ts, nil
 		}
 	}
@@ -228,7 +198,7 @@ func parseTimestamp64(value string, convertTimeToLocalTZ bool) (time.Time, error
 		"2006-01-02",
 	}
 	for _, layout := range withoutZone {
-		if ts, err := time.ParseInLocation(layout, value, location); err == nil {
+		if ts, err := time.ParseInLocation(layout, value, time.UTC); err == nil {
 			return ts, nil
 		}
 	}

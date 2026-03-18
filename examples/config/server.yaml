@@ -4,9 +4,6 @@ max_compressed_body_bytes: 8388608
 max_decompressed_body_bytes: 33554432
 position_table: "loglugger_positions"
 field_mapping_file: "examples/mappings/basic.yaml"
-# Parse timezone-less timestamps using OS local timezone before saving.
-# Useful for local-time log formats, but dangerous if hosts/timezones are inconsistent.
-convert_time_to_local_tz: false
 
 tls_cert_file: "certs/server.crt"
 tls_key_file: "certs/server.key"

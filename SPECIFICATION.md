@@ -9,6 +9,8 @@ Loglugger is a two-component system for collecting log records from systemd jour
 
 The system implements a **position-tracking protocol** to ensure exactly-once delivery semantics and ordered processing of log records per client.
 
+All timestamps transferred or persisted by Loglugger as typed timestamp values are UTC. In particular, Unix-epoch timestamps are interpreted as UTC, and timezone-less values passed through the `timestamp64` transform are parsed as UTC before storage.
+
 ---
 
 ## 2. Terminology
@@ -281,6 +283,7 @@ RETURN 200 with next_position
   - `log_timestamp_us`: record timestamp as `Timestamp64` (microsecond precision).
   - `message_hash`: `Uint64` from `CityHash64` over the full record payload.
 - **Batching**: Map incoming records to table rows. Add server-side metadata (timestamp, client_id) before upsert.
+- **Timezone rule**: Typed timestamps transferred to YDB are stored in UTC.
 - **Write ordering**: Successful record persistence must happen before position advancement. If record persistence fails, the server must not update `expected_position`.
 - **Library**: Use `github.com/ydb-platform/ydb-go-sdk/v3` or equivalent.
 - **Authentication modes**: YDB connection auth is configurable and supports:
@@ -330,9 +333,10 @@ field_mapping:
 - **Resolution order**: When building a row, the server checks `parsed` first for parsed fields; if the record has `message` instead of `parsed`, the mapping for `parsed.*` yields no value (or a configured default).
 - **Missing source**: If a mapped source field is absent, the destination column may be left NULL or filled with a default (configurable per mapping).
 - **Unmapped columns**: Destination columns not in the mapping may be set from server metadata (e.g., `received_at` = now) or left NULL.
-- **Time conversion option**: Server config option `convert_time_to_local_tz` controls parsing of timezone-less values in `timestamp64` transform:
-  - `false` (default): parse timezone-less values as UTC.
-  - `true`: parse timezone-less values in OS local timezone (`time.Local`) before saving. This is useful for local-time log formats but dangerous when hosts are configured inconsistently.
+- **Timestamp parsing**:
+  - `timestamp64_us` interprets numeric input as Unix microseconds in UTC.
+  - `timestamp64` interprets timezone-less input as UTC.
+  - `timestamp64` preserves the instant encoded by timezone-aware input; persisted typed timestamp values are stored in UTC.
 
 ### 5.6 Parsed Fields from Client (Optional)
 
@@ -476,7 +480,6 @@ loglugger/
 | position_table | string | loglugger_positions | YDB table used to store expected position per client |
 | **Field mapping** | | | |
 | field_mapping_file | string | — | Path to YAML/JSON file with source→destination field mappings |
-| convert_time_to_local_tz | bool | false | Parse timezone-less `timestamp64` values in OS local timezone before writing (dangerous if timezone config differs across hosts) |
 | **TLS** | | | |
 | tls_cert_file | string | — | Path to server certificate (PEM) |
 | tls_key_file | string | — | Path to server private key (PEM) |
