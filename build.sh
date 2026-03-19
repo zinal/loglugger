@@ -7,3 +7,4 @@ LDFLAGS="-X github.com/ydb-platform/loglugger/internal/buildinfo.Version=${VERSI
 
 go build -ldflags "${LDFLAGS}" -o bin/loglugger-server ./cmd/server
 go build -ldflags "${LDFLAGS}" -o bin/loglugger-client ./cmd/client
+go build -ldflags "${LDFLAGS}" -o bin/loglugger-extractor ./cmd/extractor

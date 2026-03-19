@@ -8,6 +8,7 @@ See [SPECIFICATION.md](SPECIFICATION.md) for the formal specification.
 
 - **Client** (`cmd/client`): Reads records from journald, optionally parses messages with a regular expression, groups them into batches, and sends them to the server over HTTP.
 - **Server** (`cmd/server`): Accepts batches, validates position continuity, maps fields, and writes them to storage (`MockWriter` by default).
+- **Extractor** (`cmd/extractor`): Reads historical records from YDB with query-time filters and writes rotating TSV files (optionally zstd-compressed).
 
 ## Build
 
@@ -20,7 +21,7 @@ This repository vendors a fork of `github.com/coreos/go-systemd/v22` under `thir
 
 The client requires Linux for journald support. On macOS and Windows, the client fails at startup with "journald is only supported on Linux".
 
-After building, use `./bin/loglugger-server` and `./bin/loglugger-client` in the run commands below.
+After building, use `./bin/loglugger-server`, `./bin/loglugger-client`, and `./bin/loglugger-extractor` in the run commands below.
 
 ## Run
 
@@ -65,6 +66,28 @@ Client configuration:
 - Every outgoing record includes `seqno`: a monotonically increasing client-side sequence number. The first value equals client startup time in milliseconds since Unix epoch.
 
 When recovery is enabled and corruption is detected, the client warns that data loss is possible, tries to reopen the journal and resume from the last good position, and falls back to seeking past the last good timestamp. If recovery succeeds, the next batch is sent with a reset so the server accepts the new position. If recovery still fails, the client stops.
+
+**Extractor** (reads YDB and writes TSV):
+```bash
+./bin/loglugger-extractor \
+  -server-config examples/ydbd/loglugger-server.yaml \
+  -from 2025-03-13T10:00:00Z \
+  -to 2025-03-13T11:00:00Z \
+  -output-dir ./out
+```
+
+Extractor configuration and behavior:
+
+- `-server-config` is required and reuses server YDB settings (`ydb_endpoint`, `ydb_database`, `ydb_table`, `ydb_auth_*`, `ydb_ca_path`, `ydb_open_timeout`).
+- `-from` and `-to` are mandatory and define `[from,to)` with inclusive lower bound and exclusive upper bound (RFC3339/RFC3339Nano).
+- `-time-column` selects event-time column for interval filter (default `ts_orig`).
+- `-filter field=v1,v2` adds optional field-list filters (`IN` clauses). Repeat `-filter` to add more fields.
+- Output format is TSV; text values are normalized so TAB/newline characters do not break TSV rows.
+- Rotation is size-based:
+  - default plain output limit: `200MiB`
+  - default zstd output limit (`-zstd`): `10MiB`
+  - override with `-max-file-size`
+- Files are named `<output-prefix>_<NNNNNN>.tsv` (or `.tsv.zst` with `-zstd`).
 
 ### Example Mapping Files
 

@@ -2,10 +2,11 @@
 
 ## 1. Overview
 
-Loglugger is a two-component system for collecting log records from systemd journald and persisting them to YDB (Yandex Database). The architecture consists of:
+Loglugger is a multi-component system for collecting log records from systemd journald, persisting them to YDB (Yandex Database), and exporting stored records for downstream processing. The architecture consists of:
 
 - **Client**: Reads from journald, optionally filters by service name, batches records, and sends them to the server via HTTP.
 - **Server**: Receives batches, validates position continuity, and writes to YDB using BulkUpsert.
+- **Extractor tool**: Reads records from YDB with query-time filters and writes them to TSV files with optional zstd compression.
 
 The system implements a **position-tracking protocol** to ensure exactly-once delivery semantics and ordered processing of log records per client.
 
@@ -352,6 +353,49 @@ When client-side parsing is enabled, records may include `parsed` fields extract
 - **Value**: `expected_position` string.
 - **Update**: Update only after successful record write. If the record write fails, do not modify the stored position.
 - **Retention**: Consider TTL or cleanup for inactive clients.
+
+### 5.8 Database Extraction Tool
+
+Loglugger must include a dedicated extraction tool that reads records from the target YDB table and writes them to a set of output files.
+
+- **Goal**: Export historical records from database storage into filesystem files for transfer or offline analysis.
+- **Source**: The tool reads from the configured target logs table (same schema family used by server writes).
+- **Output files**: Extraction output is split into a series of files; when the current file reaches the configured size limit, the tool switches to the next file.
+
+#### 5.8.1 Query and Filters
+
+- **Mandatory filter**: Time interval filter is required for every extraction run.
+- **Time semantics**: The interval is applied to the table timestamp field used for event time (configured column, typically `ts_orig`), with inclusive lower bound and exclusive upper bound.
+- **Optional field-list filters**: The tool supports filtering by a list of values in a specified table field, for example `dbname`, `level`, `service`, `unit`, `hostname`.
+- **SQL construction**: Filters are applied by adding parameters to the `SELECT` statement used to fetch records.
+  - Time interval parameters are always added.
+  - Field-list filters are added only when provided.
+
+#### 5.8.2 File Format and Escaping
+
+- **Format**: Output format is tab-separated values (TSV).
+- **Tab normalization**: During extraction, TAB characters in text fields must be replaced with SPACE before writing rows.
+- **Row layout**: Each selected record is written as one TSV line with `\n` line terminator.
+
+#### 5.8.3 Compression and File Rotation
+
+- **Compression**: The tool supports optional zstd compression for output files.
+- **Rotation unit**: File rotation uses output-file size limit:
+  - for uncompressed output, measured on plain TSV bytes written;
+  - for compressed output, measured on compressed bytes written.
+- **Default size limits**:
+  - Uncompressed output: `200 MiB`
+  - Compressed output (zstd enabled): `10 MiB`
+
+#### 5.8.4 Database connection specification
+
+The tool should support reading the database connection parameters from the configuration files for the server component.
+
+#### 5.8.5 Filtering parameters specification
+
+The tool should allow to specify the extraction filters through the command line parameters.
+
+Time interval parameters are required, other filters are optional.
 
 ---
 

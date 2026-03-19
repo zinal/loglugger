@@ -10,6 +10,27 @@ This folder contains a complete `ydbd`-oriented Loglugger example:
 - `ydb-loglugger-client.service` - systemd startup unit for the client.
 - `ydb-loglugger-client.env` - example variables for the systemd unit.
 
+### Extraction Example
+
+Use `loglugger-extractor` to export YDB rows into rotating TSV files:
+
+```bash
+./bin/loglugger-extractor \
+  -server-config examples/ydbd/loglugger-server.yaml \
+  -from 2025-03-13T10:00:00Z \
+  -to 2025-03-13T11:00:00Z \
+  -filter dbname=local,prod \
+  -filter service_name=ydbd \
+  -zstd \
+  -output-dir ./out
+```
+
+Notes:
+
+- Time filter is required (`-from`, `-to`) and is applied as `[from,to)`.
+- Optional `-filter field=v1,v2` flags add `IN` filters to SQL.
+- Rotation defaults: `200MiB` for plain TSV, `10MiB` with `-zstd` (override via `-max-file-size`).
+
 ### Mapping Notes
 
 - parser regexes are configured on client (`loglugger-client.yaml`, `message_regex`, `systemd_unit_regex`):
