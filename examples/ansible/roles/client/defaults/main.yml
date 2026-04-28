@@ -1,0 +1,16 @@
+---
+loglugger_prefix: /opt/ydb/loglugger
+loglugger_local_bin_dir: ./bin
+loglugger_client_id: "{{ inventory_hostname }}"
+loglugger_client_server_url: "https://127.0.0.1:27312"
+loglugger_client_service_mask: ""
+loglugger_client_journal_recovery: true
+loglugger_client_batch_size: 50000
+loglugger_client_batch_timeout: "5s"
+loglugger_client_http_timeout: "30s"
+loglugger_client_retry_delay: "1s"
+
+loglugger_cert_dir: /opt/ydb/certs
+loglugger_client_tls_ca_file: "{{ loglugger_cert_dir }}/ca.crt"
+loglugger_client_tls_cert_file: "{{ loglugger_cert_dir }}/client.crt"
+loglugger_client_tls_key_file: "{{ loglugger_cert_dir }}/client.key"

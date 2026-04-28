@@ -1,0 +1,17 @@
+listen_addr: "{{ loglugger_server_listen_addr }}"
+writer_backend: "{{ loglugger_server_writer_backend }}"
+position_table: "{{ loglugger_server_position_table }}"
+field_mapping_file: "{{ loglugger_server_field_mapping_file }}"
+max_compressed_body_bytes: 8388608
+max_decompressed_body_bytes: 33554432
+
+ydb_endpoint: "{{ loglugger_server_ydb_endpoint }}"
+ydb_database: "{{ loglugger_server_ydb_database }}"
+ydb_table: "{{ loglugger_server_ydb_table }}"
+ydb_auth_mode: "{{ loglugger_server_ydb_auth_mode }}"
+ydb_ca_path: "{{ loglugger_server_ydb_ca_path }}"
+ydb_open_timeout: "{{ loglugger_server_ydb_open_timeout }}"
+
+tls_cert_file: "{{ loglugger_server_tls_cert_file }}"
+tls_key_file: "{{ loglugger_server_tls_key_file }}"
+tls_ca_file: "{{ loglugger_server_tls_ca_file }}"

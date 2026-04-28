@@ -1,0 +1,6 @@
+---
+- name: Restart loglugger-server
+  ansible.builtin.systemd:
+    name: loglugger-server.service
+    daemon_reload: true
+    state: restarted

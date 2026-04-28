@@ -1,0 +1,37 @@
+---
+- name: Create Loglugger directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ loglugger_prefix }}"
+    - "{{ loglugger_prefix }}/bin"
+    - "{{ loglugger_prefix }}/config"
+
+- name: Install loglugger-client binary
+  ansible.builtin.copy:
+    src: "{{ loglugger_local_bin_dir }}/loglugger-client"
+    dest: "{{ loglugger_prefix }}/bin/loglugger-client"
+    mode: "0755"
+
+- name: Install client config
+  ansible.builtin.template:
+    src: loglugger-client.yaml.j2
+    dest: "{{ loglugger_prefix }}/config/loglugger-client.yaml"
+    mode: "0644"
+  notify: Restart loglugger-client
+
+- name: Install systemd unit
+  ansible.builtin.template:
+    src: loglugger-client.service.j2
+    dest: /etc/systemd/system/loglugger-client.service
+    mode: "0644"
+  notify: Restart loglugger-client
+
+- name: Ensure loglugger-client is enabled and running
+  ansible.builtin.systemd:
+    name: loglugger-client.service
+    daemon_reload: true
+    enabled: true
+    state: started

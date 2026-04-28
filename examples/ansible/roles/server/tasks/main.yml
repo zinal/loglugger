@@ -1,0 +1,44 @@
+---
+- name: Create Loglugger directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ loglugger_prefix }}"
+    - "{{ loglugger_prefix }}/bin"
+    - "{{ loglugger_prefix }}/config"
+
+- name: Install loglugger-server binary
+  ansible.builtin.copy:
+    src: "{{ loglugger_local_bin_dir }}/loglugger-server"
+    dest: "{{ loglugger_prefix }}/bin/loglugger-server"
+    mode: "0755"
+
+- name: Install server config
+  ansible.builtin.template:
+    src: loglugger-server.yaml.j2
+    dest: "{{ loglugger_prefix }}/config/loglugger-server.yaml"
+    mode: "0644"
+  notify: Restart loglugger-server
+
+- name: Install field mapping config
+  ansible.builtin.template:
+    src: field_mapping.yaml.j2
+    dest: "{{ loglugger_server_field_mapping_file }}"
+    mode: "0644"
+  notify: Restart loglugger-server
+
+- name: Install systemd unit
+  ansible.builtin.template:
+    src: loglugger-server.service.j2
+    dest: /etc/systemd/system/loglugger-server.service
+    mode: "0644"
+  notify: Restart loglugger-server
+
+- name: Ensure loglugger-server is enabled and running
+  ansible.builtin.systemd:
+    name: loglugger-server.service
+    daemon_reload: true
+    enabled: true
+    state: started

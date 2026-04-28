@@ -1,0 +1,13 @@
+server_url: "{{ loglugger_client_server_url }}"
+client_id: "{{ loglugger_client_id }}"
+service_mask: "{{ loglugger_client_service_mask }}"
+journal_recovery: {{ loglugger_client_journal_recovery | bool | lower }}
+
+batch_size: {{ loglugger_client_batch_size }}
+batch_timeout: "{{ loglugger_client_batch_timeout }}"
+http_timeout: "{{ loglugger_client_http_timeout }}"
+retry_delay: "{{ loglugger_client_retry_delay }}"
+
+tls_ca_file: "{{ loglugger_client_tls_ca_file }}"
+tls_cert_file: "{{ loglugger_client_tls_cert_file }}"
+tls_key_file: "{{ loglugger_client_tls_key_file }}"

@@ -1,0 +1,12 @@
+---
+- name: Install Loglugger server
+  hosts: loglugger_server
+  become: true
+  roles:
+    - role: server
+
+- name: Install Loglugger client
+  hosts: loglugger_client
+  become: true
+  roles:
+    - role: client

@@ -1,0 +1,40 @@
+---
+loglugger_prefix: /opt/ydb/loglugger
+loglugger_local_bin_dir: ./bin
+
+loglugger_server_listen_addr: ":27312"
+loglugger_server_writer_backend: "ydb"
+loglugger_server_position_table: "loglugger_positions"
+loglugger_server_field_mapping_file: "{{ loglugger_prefix }}/config/field_mapping.yaml"
+
+loglugger_server_ydb_endpoint: "grpcs://localhost:2135"
+loglugger_server_ydb_database: "/local"
+loglugger_server_ydb_table: "ydblogs"
+loglugger_server_ydb_auth_mode: "anonymous"
+loglugger_server_ydb_ca_path: "{{ loglugger_cert_dir }}/ca.crt"
+loglugger_server_ydb_open_timeout: "10s"
+
+loglugger_cert_dir: /opt/ydb/certs
+loglugger_server_tls_ca_file: "{{ loglugger_cert_dir }}/ca.crt"
+loglugger_server_tls_cert_file: "{{ loglugger_cert_dir }}/server.crt"
+loglugger_server_tls_key_file: "{{ loglugger_cert_dir }}/server.key"
+---
+loglugger_prefix: /opt/ydb/loglugger
+loglugger_local_bin_dir: ./bin
+
+loglugger_server_listen_addr: ":27312"
+loglugger_server_writer_backend: "ydb"
+loglugger_server_position_table: "loglugger_positions"
+loglugger_server_field_mapping_file: "{{ loglugger_prefix }}/config/field_mapping.yaml"
+
+loglugger_server_ydb_endpoint: "grpcs://localhost:2135"
+loglugger_server_ydb_database: "/local"
+loglugger_server_ydb_table: "ydblogs"
+loglugger_server_ydb_auth_mode: "anonymous"
+loglugger_server_ydb_ca_path: "{{ loglugger_cert_dir }}/ca.crt"
+loglugger_server_ydb_open_timeout: "10s"
+
+loglugger_cert_dir: /opt/ydb/certs
+loglugger_server_tls_ca_file: "{{ loglugger_cert_dir }}/ca.crt"
+loglugger_server_tls_cert_file: "{{ loglugger_cert_dir }}/server.crt"
+loglugger_server_tls_key_file: "{{ loglugger_cert_dir }}/server.key"

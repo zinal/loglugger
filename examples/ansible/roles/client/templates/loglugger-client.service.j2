@@ -1,0 +1,16 @@
+[Unit]
+Description=Loglugger client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart={{ loglugger_prefix }}/bin/loglugger-client -config {{ loglugger_prefix }}/config/loglugger-client.yaml
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
