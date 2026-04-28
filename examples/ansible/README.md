@@ -42,6 +42,49 @@ Run the playbook from this directory:
 ansible-playbook -i inventory.ini playbook.yml
 ```
 
+## Configure YDB and ports
+
+The easiest way is to define variables in `inventory.ini` under `[all:vars]`.
+
+Example:
+
+```ini
+[loglugger_server]
+server-1 ansible_host=192.168.10.10
+server-2 ansible_host=192.168.10.11
+
+[loglugger_client]
+client-1 ansible_host=192.168.10.21
+client-2 ansible_host=192.168.10.22
+
+[all:vars]
+ansible_user=ubuntu
+ansible_become=true
+
+# Loglugger server listen port (server config listen_addr)
+loglugger_server_listen_addr=:28443
+
+# Client-side server URL generation from loglugger_server inventory group
+loglugger_client_server_scheme=https
+loglugger_client_server_port=28443
+
+# YDB connection settings used by the server role
+loglugger_server_ydb_endpoint=grpcs://ydb.example.internal:2135
+loglugger_server_ydb_database=/prod
+loglugger_server_ydb_table=ydblogs
+loglugger_server_ydb_auth_mode=anonymous
+# optional
+# loglugger_server_ydb_open_timeout=20s
+# loglugger_server_ydb_ca_path=/opt/ydb/certs/ca.crt
+```
+
+How this works:
+
+- `loglugger_server_listen_addr` controls the server bind port.
+- clients build `server_urls` from hosts in `loglugger_server` using `loglugger_client_server_scheme` + host + `loglugger_client_server_port`.
+- YDB connection parameters come from `loglugger_server_ydb_*` variables.
+- if you want a fixed server list instead of inventory-derived URLs, set `loglugger_client_server_urls` (or `loglugger_client_server_urls_override` in `playbook.yml`).
+
 ## Common overrides
 
 Set these in inventory/group vars/host vars as needed:
@@ -49,6 +92,8 @@ Set these in inventory/group vars/host vars as needed:
 - `loglugger_local_bin_dir` (default: `{{ playbook_dir }}/../../bin`) - local source directory for built binaries
 - `loglugger_prefix` (default: `/opt/ydb/loglugger`) - install prefix on target hosts
 - `loglugger_client_server_urls` - explicit client server URL list (e.g. `["https://s1:27312","https://s2:27312"]`)
+- `loglugger_server_listen_addr` - Loglugger server listen address (e.g. `:27312`)
+- `loglugger_client_server_scheme`, `loglugger_client_server_port` - default client URL generation controls
 - `loglugger_server_ydb_endpoint`, `loglugger_server_ydb_database`, `loglugger_server_ydb_table`
 
 Client server URL behavior:
