@@ -4,6 +4,12 @@ A two-component system for collecting records from systemd journald and storing 
 
 See [SPECIFICATION.md](SPECIFICATION.md) for the formal specification.
 
+## Deployment Options
+
+- **Ansible automation (recommended for YDB environments):** `examples/ansible/README.md`
+- **Manual setup (fine-tuned/custom deployments):** sections below in this README
+- For a typical YDB installation, Loglugger can reuse existing YDB certificates from `/opt/ydb/certs` (`ca.crt`, `node.crt`, `node.key`), as shown in the Ansible example.
+
 ## Components
 
 - **Client** (`cmd/client`): Reads records from journald, optionally parses messages with a regular expression, groups them into batches, and sends them to the server over HTTP.
@@ -29,6 +35,7 @@ After building, use `./bin/loglugger-server`, `./bin/loglugger-client`, and `./b
 ```bash
 ./bin/loglugger-server -config examples/config/server.yaml
 ```
+Manual variant (Ansible automation available): see `examples/ansible/README.md` (`server` role).
 
 Server configuration:
 
@@ -45,6 +52,7 @@ Server configuration:
 ```bash
 ./bin/loglugger-client -config examples/config/client.yaml
 ```
+Manual variant (Ansible automation available): see `examples/ansible/README.md` (`client` role).
 
 Client configuration:
 
@@ -101,6 +109,7 @@ Extractor configuration and behavior:
 ### Local mTLS Setup
 
 The following `openssl` commands generate a local CA, together with server and client certificates, for the sample mTLS setup.
+This is a manual, fine-tuned alternative. For typical YDB installations, you can reuse existing YDB certificates from `/opt/ydb/certs` (documented in `examples/ansible/README.md`) instead of generating a separate local CA.
 
 ```bash
 mkdir -p certs
@@ -161,6 +170,7 @@ The test suite includes unit tests for `parser`, `batcher`, `models`, and `handl
 ## YDB Integration
 
 The server supports `writer_backend: ydb` and uses `github.com/ydb-platform/ydb-go-sdk/v3` for `BulkUpsert`. When enabling the YDB backend, set `ydb_endpoint`, `ydb_database`, and `ydb_table` in the configuration file. The position storage backend is selected automatically from `writer_backend` (`mock` -> in-memory positions, `ydb` -> YDB-backed positions via `position_table`). `MockWriter` remains available for tests and local runs.
+Manual variant (Ansible automation available): `examples/ansible/README.md` automates server/client config generation, systemd unit installation, default YDB-compatible field mapping, and service enable/start.
 
 Supported YDB auth modes:
 
