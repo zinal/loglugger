@@ -11,6 +11,8 @@ loglugger_server_ydb_endpoint: "grpcs://localhost:2135"
 loglugger_server_ydb_database: "/local"
 loglugger_server_ydb_table: "ydblogs"
 loglugger_server_ydb_auth_mode: "anonymous"
+loglugger_server_ydb_auth_login: ""
+loglugger_server_ydb_auth_password: ""
 loglugger_server_ydb_ca_path: "{{ loglugger_cert_dir }}/ca.crt"
 loglugger_server_ydb_open_timeout: "10s"
 

@@ -1,4 +1,14 @@
 ---
+- name: Validate static YDB auth settings
+  ansible.builtin.assert:
+    that:
+      - loglugger_server_ydb_auth_login | length > 0
+      - loglugger_server_ydb_auth_password | length > 0
+    fail_msg: >-
+      loglugger_server_ydb_auth_mode=static requires both
+      loglugger_server_ydb_auth_login and loglugger_server_ydb_auth_password.
+  when: loglugger_server_ydb_auth_mode == "static"
+
 - name: Create Loglugger directories
   ansible.builtin.file:
     path: "{{ item }}"

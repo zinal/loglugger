@@ -9,6 +9,10 @@ ydb_endpoint: "{{ loglugger_server_ydb_endpoint }}"
 ydb_database: "{{ loglugger_server_ydb_database }}"
 ydb_table: "{{ loglugger_server_ydb_table }}"
 ydb_auth_mode: "{{ loglugger_server_ydb_auth_mode }}"
+{% if loglugger_server_ydb_auth_mode == "static" %}
+ydb_auth_login: "{{ loglugger_server_ydb_auth_login }}"
+ydb_auth_password: "{{ loglugger_server_ydb_auth_password }}"
+{% endif %}
 ydb_ca_path: "{{ loglugger_server_ydb_ca_path }}"
 ydb_open_timeout: "{{ loglugger_server_ydb_open_timeout }}"
 

@@ -70,9 +70,11 @@ loglugger_client_server_port=28443
 
 # YDB connection settings used by the server role
 loglugger_server_ydb_endpoint=grpcs://ydb.example.internal:2135
-loglugger_server_ydb_database=/prod
+loglugger_server_ydb_database=/Root/logdb
 loglugger_server_ydb_table=ydblogs
-loglugger_server_ydb_auth_mode=anonymous
+loglugger_server_ydb_auth_mode=static
+loglugger_server_ydb_auth_login=ydb_user
+loglugger_server_ydb_auth_password=change_me
 # optional
 # loglugger_server_ydb_open_timeout=20s
 # loglugger_server_ydb_ca_path=/opt/ydb/certs/ca.crt
@@ -83,6 +85,7 @@ How this works:
 - `loglugger_server_listen_addr` controls the server bind port.
 - clients build `server_urls` from hosts in `loglugger_server` using `loglugger_client_server_scheme` + host + `loglugger_client_server_port`.
 - YDB connection parameters come from `loglugger_server_ydb_*` variables.
+- when `loglugger_server_ydb_auth_mode=static`, you must define both `loglugger_server_ydb_auth_login` and `loglugger_server_ydb_auth_password`; the role validates this with an Ansible assert.
 - if you want a fixed server list instead of inventory-derived URLs, set `loglugger_client_server_urls` (or `loglugger_client_server_urls_override` in `playbook.yml`).
 
 ## Common overrides
@@ -95,6 +98,8 @@ Set these in inventory/group vars/host vars as needed:
 - `loglugger_server_listen_addr` - Loglugger server listen address (e.g. `:27312`)
 - `loglugger_client_server_scheme`, `loglugger_client_server_port` - default client URL generation controls
 - `loglugger_server_ydb_endpoint`, `loglugger_server_ydb_database`, `loglugger_server_ydb_table`
+- `loglugger_server_ydb_auth_mode` (`anonymous` or `static`)
+- `loglugger_server_ydb_auth_login`, `loglugger_server_ydb_auth_password` (required for `static`)
 
 Client server URL behavior:
 
