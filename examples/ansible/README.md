@@ -39,7 +39,7 @@ cp inventory.example.ini inventory.ini
 Run the playbook from this directory:
 
 ```bash
-ansible-playbook -i inventory.ini playbook.yml
+ansible-playbook -i inventory.ini -f 50 playbook.yml
 ```
 
 ## Configure YDB and ports

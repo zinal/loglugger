@@ -3,10 +3,10 @@ server_urls:
   - "{{ url }}"
 {% endfor %}
 client_id: "{{ loglugger_client_id }}"
-service_mask: "{{ loglugger_client_service_mask }}"
+service_mask: '{{ loglugger_client_service_mask | replace("'", "''") }}'
 journal_recovery: {{ loglugger_client_journal_recovery | bool | lower }}
-message_regex: '{{ loglugger_client_message_regex }}'
-systemd_unit_regex: '{{ loglugger_client_systemd_unit_regex }}'
+message_regex: '{{ loglugger_client_message_regex | replace("'", "''") }}'
+systemd_unit_regex: '{{ loglugger_client_systemd_unit_regex | replace("'", "''") }}'
 message_regex_no_match: "{{ loglugger_client_message_regex_no_match }}"
 multiline_timeout: "{{ loglugger_client_multiline_timeout }}"
 multiline_max_messages: {{ loglugger_client_multiline_max_messages }}
