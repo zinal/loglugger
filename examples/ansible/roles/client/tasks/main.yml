@@ -1,4 +1,41 @@
 ---
+- name: Initialize default client server URLs
+  ansible.builtin.set_fact:
+    _loglugger_client_server_urls_default: []
+  when: loglugger_client_server_urls | length == 0
+
+- name: Build default client server URLs from inventory
+  ansible.builtin.set_fact:
+    _loglugger_client_server_urls_default: >-
+      {{
+        (_loglugger_client_server_urls_default | default([]))
+        + [
+          loglugger_client_server_scheme
+          ~ "://"
+          ~ (hostvars[item].ansible_host | default(item))
+          ~ ":"
+          ~ (loglugger_client_server_port | string)
+        ]
+      }}
+  loop: "{{ groups[loglugger_client_server_group] | default([]) }}"
+  when: loglugger_client_server_urls | length == 0
+
+- name: Select effective client server URLs
+  ansible.builtin.set_fact:
+    loglugger_client_effective_server_urls: >-
+      {{
+        loglugger_client_server_urls
+        if (loglugger_client_server_urls | length > 0)
+        else (_loglugger_client_server_urls_default | default([]))
+      }}
+
+- name: Fail when no client server URLs are available
+  ansible.builtin.fail:
+    msg: >-
+      No client server URLs configured. Set loglugger_client_server_urls
+      or ensure the inventory has hosts in group {{ loglugger_client_server_group }}.
+  when: loglugger_client_effective_server_urls | length == 0
+
 - name: Create Loglugger directories
   ansible.builtin.file:
     path: "{{ item }}"

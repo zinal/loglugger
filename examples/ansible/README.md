@@ -25,10 +25,8 @@ By default, both roles use YDB certificates from `/opt/ydb/certs`.
 2. Ensure target hosts already have certificates in `/opt/ydb/certs`:
 
 - `/opt/ydb/certs/ca.crt`
-- `/opt/ydb/certs/server.crt`
-- `/opt/ydb/certs/server.key`
-- `/opt/ydb/certs/client.crt`
-- `/opt/ydb/certs/client.key`
+- `/opt/ydb/certs/node.crt`
+- `/opt/ydb/certs/node.key`
 
 ## Usage
 
@@ -50,8 +48,14 @@ Set these in inventory/group vars/host vars as needed:
 
 - `loglugger_local_bin_dir` (default: `./bin`) - local source directory for built binaries
 - `loglugger_prefix` (default: `/opt/ydb/loglugger`) - install prefix on target hosts
-- `loglugger_client_server_url` - server URL for each client host
+- `loglugger_client_server_urls` - explicit client server URL list (e.g. `["https://s1:27312","https://s2:27312"]`)
 - `loglugger_server_ydb_endpoint`, `loglugger_server_ydb_database`, `loglugger_server_ydb_table`
+
+Client server URL behavior:
+
+- by default, the client role builds `server_urls` from inventory hosts in `loglugger_server`
+- each URL uses `https://<ansible_host>:27312` (or inventory hostname when `ansible_host` is not set)
+- you can override in `playbook.yml` via `loglugger_client_server_urls_override`
 
 ## Certificate defaults
 
@@ -63,6 +67,6 @@ loglugger_cert_dir: /opt/ydb/certs
 
 Derived defaults:
 
-- server TLS: `server.crt`, `server.key`, `ca.crt`
-- client TLS: `client.crt`, `client.key`, `ca.crt`
+- server TLS: `node.crt`, `node.key`, `ca.crt`
+- client TLS: `node.crt`, `node.key`, `ca.crt`
 - YDB CA: `ca.crt`

@@ -1,4 +1,7 @@
-server_url: "{{ loglugger_client_server_url }}"
+server_urls:
+{% for url in loglugger_client_effective_server_urls %}
+  - "{{ url }}"
+{% endfor %}
 client_id: "{{ loglugger_client_id }}"
 service_mask: "{{ loglugger_client_service_mask }}"
 journal_recovery: {{ loglugger_client_journal_recovery | bool | lower }}

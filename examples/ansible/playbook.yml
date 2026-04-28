@@ -8,5 +8,11 @@
 - name: Install Loglugger client
   hosts: loglugger_client
   become: true
+  vars:
+    # Optional override. When empty, URLs are built from the loglugger_server
+    # inventory group as https://<ansible_host>:27312.
+    loglugger_client_server_urls_override: []
   roles:
     - role: client
+      vars:
+        loglugger_client_server_urls: "{{ loglugger_client_server_urls_override }}"
