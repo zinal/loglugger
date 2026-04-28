@@ -1,36 +1,34 @@
 field_mapping:
-  - source: message
-    destination: message
-  - source: seqno
-    destination: seqno
-    transform: int64
-  - source: parsed.P_DTTM
-    destination: log_dttm
-  - source: parsed.P_SERVICE
-    destination: service_name
-  - source: parsed.P_LEVEL
-    destination: log_level
-  - source: parsed.P_MESSAGE
-    destination: log_message
-  - source: syslog_identifier
-    destination: syslog_id
+  # Required key/identity fields for examples/ydbd/target_table.sql.
+  - source: client_id
+    destination: hostname
   - source: systemd_unit
-    destination: systemd_unit
+    destination: unit
   - source: log_timestamp_us
-    destination: log_timestamp_us
+    destination: ts_log
     transform: timestamp64_us
   - source: message_cityhash64
     destination: message_hash
     transform: uint64
-  - source: priority
-    destination: priority
-    transform: int
-  - source: fields.CODE_FILE
-    destination: code_file
-    default: unknown
-  - source: fields.CODE_LINE
-    destination: code_line
+  - source: seqno
+    destination: seqno
     transform: int64
-    default: "0"
-  - source: client_id
-    destination: client_id
+
+  # Optional data fields.
+  - source: realtime_ts
+    destination: ts_orig
+    transform: timestamp64_us
+  - source: parsed.P_DBNAME
+    destination: dbname
+    default: "-"
+  - source: parsed.P_SERVICE
+    destination: service
+    default: unknown
+  - source: parsed.P_LEVEL
+    destination: level
+    default: unknown
+  - source: message
+    destination: msg
+  - source: parsed.P_MESSAGE
+    destination: msg
+    default: ""

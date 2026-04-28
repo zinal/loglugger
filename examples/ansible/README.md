@@ -88,6 +88,12 @@ How this works:
 - when `loglugger_server_ydb_auth_mode=static`, you must define both `loglugger_server_ydb_auth_login` and `loglugger_server_ydb_auth_password`; the role validates this with an Ansible assert.
 - if you want a fixed server list instead of inventory-derived URLs, set `loglugger_client_server_urls` (or `loglugger_client_server_urls_override` in `playbook.yml`).
 
+YDB table mapping note:
+
+- the Ansible server role installs `field_mapping.yaml` compatible with `examples/ydbd/target_table.sql`
+- required YDB columns mapped by default: `ts_log`, `seqno`, `hostname`, `message_hash`
+- if you use a different YDB schema, override `loglugger_server_field_mapping_file` and provide your own mapping file
+
 ## Common overrides
 
 Set these in inventory/group vars/host vars as needed:
