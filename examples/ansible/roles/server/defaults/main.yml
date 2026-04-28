@@ -1,6 +1,6 @@
 ---
 loglugger_prefix: /opt/ydb/loglugger
-loglugger_local_bin_dir: ./bin
+loglugger_local_bin_dir: "{{ playbook_dir }}/../../bin"
 
 loglugger_server_listen_addr: ":27312"
 loglugger_server_writer_backend: "ydb"

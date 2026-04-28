@@ -46,7 +46,7 @@ ansible-playbook -i inventory.ini playbook.yml
 
 Set these in inventory/group vars/host vars as needed:
 
-- `loglugger_local_bin_dir` (default: `./bin`) - local source directory for built binaries
+- `loglugger_local_bin_dir` (default: `{{ playbook_dir }}/../../bin`) - local source directory for built binaries
 - `loglugger_prefix` (default: `/opt/ydb/loglugger`) - install prefix on target hosts
 - `loglugger_client_server_urls` - explicit client server URL list (e.g. `["https://s1:27312","https://s2:27312"]`)
 - `loglugger_server_ydb_endpoint`, `loglugger_server_ydb_database`, `loglugger_server_ydb_table`
