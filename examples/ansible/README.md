@@ -103,6 +103,8 @@ Set these in inventory/group vars/host vars as needed:
 - `loglugger_client_server_urls` - explicit client server URL list (e.g. `["https://s1:27312","https://s2:27312"]`)
 - `loglugger_server_listen_addr` - Loglugger server listen address (e.g. `:27312`)
 - `loglugger_client_server_scheme`, `loglugger_client_server_port` - default client URL generation controls
+- `loglugger_client_service_mask` (default: `regex:^ydbd-.*\\.service$`)
+- `loglugger_client_message_regex`, `loglugger_client_systemd_unit_regex`
 - `loglugger_server_ydb_endpoint`, `loglugger_server_ydb_database`, `loglugger_server_ydb_table`
 - `loglugger_server_ydb_auth_mode` (`anonymous` or `static`)
 - `loglugger_server_ydb_auth_login`, `loglugger_server_ydb_auth_password` (required for `static`)
@@ -112,6 +114,12 @@ Client server URL behavior:
 - by default, the client role builds `server_urls` from inventory hosts in `loglugger_server`
 - each URL uses `https://<ansible_host>:27312` (or inventory hostname when `ansible_host` is not set)
 - you can override in `playbook.yml` via `loglugger_client_server_urls_override`
+
+YDBD parsing defaults in the client role:
+
+- `message_regex` extracts `P_SERVICE`, `P_LEVEL`, and `P_MESSAGE` from YDBD log lines
+- `systemd_unit_regex` extracts `P_DBNAME` from units like `ydbd-database-a.service` and `ydbd-storage-a.service`
+- these defaults prevent empty `msg` and fallback values like `unknown`/`-` in mapped YDB columns
 
 ## Certificate defaults
 

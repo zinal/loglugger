@@ -6,8 +6,13 @@ loglugger_client_server_urls: []
 loglugger_client_server_group: "loglugger_server"
 loglugger_client_server_scheme: "https"
 loglugger_client_server_port: 27312
-loglugger_client_service_mask: ""
+loglugger_client_service_mask: "regex:^ydbd-.*\\.service$"
 loglugger_client_journal_recovery: true
+loglugger_client_message_regex: '^(?:(?P<P_DTTM>[^ ]+)\s+)?:(?P<P_SERVICE>[^ ]+)\s+(?P<P_LEVEL>[^ ]+):\s+(?P<P_MESSAGE>.*)$'
+loglugger_client_systemd_unit_regex: '^ydbd-(?P<P_DBNAME>[^-]+)-.*\.service$'
+loglugger_client_message_regex_no_match: "send_raw"
+loglugger_client_multiline_timeout: "1s"
+loglugger_client_multiline_max_messages: 1000
 loglugger_client_batch_size: 50000
 loglugger_client_batch_timeout: "5s"
 loglugger_client_http_timeout: "30s"
