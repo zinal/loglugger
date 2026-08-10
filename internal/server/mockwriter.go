@@ -56,25 +56,34 @@ func (w *MockWriter) SetPosition(ctx context.Context, clientID, expectedPosition
 	if current.expected != expectedPosition {
 		return &PositionMismatchError{CurrentPosition: current.expected, Found: ok}
 	}
-	w.positions[clientID] = mockPosition{
-		expected: nextPosition,
-		tsWall:   update.TSWall.UTC(),
-		seqNo:    cloneInt64Ptr(update.MaxSeqNo),
-		tsOrig:   cloneTimePtr(update.MaxTSOrig),
-	}
+	w.positions[clientID] = mergeMockPosition(current, nextPosition, update)
 	return nil
 }
 
 func (w *MockWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string, update PositionUpdate) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.positions[clientID] = mockPosition{
+	current := w.positions[clientID]
+	w.positions[clientID] = mergeMockPosition(current, nextPosition, update)
+	return nil
+}
+
+// mergeMockPosition updates exp_pos/ts_wall and preserves prior seqno/ts_orig
+// when the incoming update does not carry those fields.
+func mergeMockPosition(current mockPosition, nextPosition string, update PositionUpdate) mockPosition {
+	next := mockPosition{
 		expected: nextPosition,
 		tsWall:   update.TSWall.UTC(),
-		seqNo:    cloneInt64Ptr(update.MaxSeqNo),
-		tsOrig:   cloneTimePtr(update.MaxTSOrig),
+		seqNo:    current.seqNo,
+		tsOrig:   current.tsOrig,
 	}
-	return nil
+	if update.MaxSeqNo != nil {
+		next.seqNo = cloneInt64Ptr(update.MaxSeqNo)
+	}
+	if update.MaxTSOrig != nil {
+		next.tsOrig = cloneTimePtr(update.MaxTSOrig)
+	}
+	return next
 }
 
 func cloneInt64Ptr(v *int64) *int64 {

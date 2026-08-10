@@ -124,6 +124,90 @@ func TestPositionUpdateFromRecords_MaxValues(t *testing.T) {
 	}
 }
 
+func TestPositionUpdateFromRecords_EmptyOrMissingFields(t *testing.T) {
+	empty := positionUpdateFromRecords(nil)
+	if empty.MaxSeqNo != nil || empty.MaxTSOrig != nil {
+		t.Fatalf("empty batch metadata = %+v, want nil seqno/ts_orig", empty)
+	}
+	if empty.TSWall.IsZero() {
+		t.Fatal("ts_wall must be set even for empty batch")
+	}
+
+	missing := positionUpdateFromRecords([]models.Record{{Message: "no metadata"}})
+	if missing.MaxSeqNo != nil || missing.MaxTSOrig != nil {
+		t.Fatalf("missing-field metadata = %+v, want nil seqno/ts_orig", missing)
+	}
+}
+
+func TestHandler_EmptyBatchPreservesPositionMetadata(t *testing.T) {
+	ctx := context.Background()
+	writer := NewMockWriter()
+	seq := int64(42)
+	tsOrig := time.UnixMicro(1_700_000_000_000_000).UTC()
+	if err := writer.SetPositionUnconditional(ctx, "client-1", "pos-1", PositionUpdate{
+		TSWall:    time.Unix(1, 0).UTC(),
+		MaxSeqNo:  &seq,
+		MaxTSOrig: &tsOrig,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewHandler(NewMapper(nil), writer, "logs")
+	resp := handler.handle(ctx, &models.BatchRequest{
+		ClientID:        "client-1",
+		CurrentPosition: "pos-1",
+		NextPosition:    "pos-2",
+		Records:         nil,
+	})
+	if resp.Status != "ok" {
+		t.Fatalf("status = %q, want ok", resp.Status)
+	}
+
+	got := writer.positions["client-1"]
+	if got.expected != "pos-2" {
+		t.Fatalf("exp_pos = %q, want pos-2", got.expected)
+	}
+	if got.seqNo == nil || *got.seqNo != seq {
+		t.Fatalf("seqno = %v, want %d", got.seqNo, seq)
+	}
+	if got.tsOrig == nil || !got.tsOrig.Equal(tsOrig) {
+		t.Fatalf("ts_orig = %v, want %v", got.tsOrig, tsOrig)
+	}
+}
+
+func TestHandler_ResetEmptyBatchPreservesPositionMetadata(t *testing.T) {
+	ctx := context.Background()
+	writer := NewMockWriter()
+	seq := int64(7)
+	tsOrig := time.UnixMicro(123).UTC()
+	if err := writer.SetPositionUnconditional(ctx, "client-1", "old", PositionUpdate{
+		TSWall:    time.Unix(1, 0).UTC(),
+		MaxSeqNo:  &seq,
+		MaxTSOrig: &tsOrig,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewHandler(NewMapper(nil), writer, "logs")
+	resp := handler.handle(ctx, &models.BatchRequest{
+		ClientID:     "client-1",
+		Reset:        true,
+		NextPosition: "new",
+		Records:      []models.Record{},
+	})
+	if resp.Status != "ok" {
+		t.Fatalf("status = %q, want ok", resp.Status)
+	}
+
+	got := writer.positions["client-1"]
+	if got.seqNo == nil || *got.seqNo != seq {
+		t.Fatalf("seqno = %v, want %d preserved across empty reset", got.seqNo, seq)
+	}
+	if got.tsOrig == nil || !got.tsOrig.Equal(tsOrig) {
+		t.Fatalf("ts_orig = %v, want %v preserved across empty reset", got.tsOrig, tsOrig)
+	}
+}
+
 func TestHandler_PositionMismatch(t *testing.T) {
 	ctx := context.Background()
 	mapper := NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}})

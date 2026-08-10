@@ -125,6 +125,9 @@ LIMIT 1;
 
 func (w *YDBWriter) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string, update PositionUpdate) error {
 	err := w.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		// COALESCE keeps previously stored seqno/ts_orig when the batch did not
+		// carry those fields (empty batch / heartbeat / optional fields omitted).
+		// UPSERT updates every listed column, so binding SQL NULL would wipe them.
 		_, err := tx.Execute(
 			ctx,
 			fmt.Sprintf(`
@@ -141,13 +144,25 @@ $current_pos = (
     WHERE client_id = $client_id
     LIMIT 1
 );
+$current_seqno = (
+    SELECT seqno
+    FROM %s
+    WHERE client_id = $client_id
+    LIMIT 1
+);
+$current_ts_orig = (
+    SELECT ts_orig
+    FROM %s
+    WHERE client_id = $client_id
+    LIMIT 1
+);
 
 UPSERT INTO %s (client_id, exp_pos, ts_wall, seqno, ts_orig)
 VALUES ($client_id, Ensure($new_exp_pos,
 			COALESCE($current_pos, ""u) == $old_exp_pos,
 			"position mismatch"),
-	$ts_wall_us, $seqno, $ts_orig);
-`, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable)),
+	$ts_wall_us, COALESCE($seqno, $current_seqno), COALESCE($ts_orig, $current_ts_orig));
+`, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
 				Param("$old_exp_pos").Text(expectedPosition).
@@ -176,6 +191,7 @@ VALUES ($client_id, Ensure($new_exp_pos,
 
 func (w *YDBWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string, update PositionUpdate) error {
 	err := w.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		// Same preserve-on-NULL semantics as SetPosition (see comment there).
 		_, err := tx.Execute(
 			ctx,
 			fmt.Sprintf(`
@@ -185,9 +201,22 @@ DECLARE $ts_wall_us AS Timestamp64;
 DECLARE $ts_orig AS Timestamp64?;
 DECLARE $seqno AS Int64?;
 
+$current_seqno = (
+    SELECT seqno
+    FROM %s
+    WHERE client_id = $client_id
+    LIMIT 1
+);
+$current_ts_orig = (
+    SELECT ts_orig
+    FROM %s
+    WHERE client_id = $client_id
+    LIMIT 1
+);
+
 UPSERT INTO %s (client_id, exp_pos, ts_wall, seqno, ts_orig)
-VALUES ($client_id, $exp_pos, $ts_wall_us, $seqno, $ts_orig);
-`, quoteYDBPath(w.positionTable)),
+VALUES ($client_id, $exp_pos, $ts_wall_us, COALESCE($seqno, $current_seqno), COALESCE($ts_orig, $current_ts_orig));
+`, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
 				Param("$exp_pos").Text(nextPosition).
