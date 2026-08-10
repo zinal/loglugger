@@ -314,6 +314,8 @@ func parseConfig() (extractConfig, error) {
 	if strings.TrimSpace(cfg.YDBTable) == "" {
 		return extractConfig{}, fmt.Errorf("ydb table is required")
 	}
+	// Native scheme APIs (DescribeTable) require a path that includes the database.
+	cfg.YDBTable = fullTablePath(cfg.YDBDatabase, cfg.YDBTable)
 	if !identifierPattern.MatchString(cfg.TimeColumn) {
 		return extractConfig{}, fmt.Errorf("time-column %q must match %s", cfg.TimeColumn, identifierPattern)
 	}
@@ -791,6 +793,17 @@ func contains(items []string, target string) bool {
 
 func quoteYDBPath(path string) string {
 	return "`" + strings.ReplaceAll(path, "`", "_") + "`"
+}
+
+// fullTablePath joins database and table into a scheme path for native YDB APIs.
+// Absolute table paths (leading "/") are left unchanged.
+func fullTablePath(database, table string) string {
+	table = strings.TrimSpace(table)
+	database = strings.TrimSpace(database)
+	if strings.HasPrefix(table, "/") || database == "" {
+		return table
+	}
+	return strings.TrimRight(database, "/") + "/" + strings.TrimLeft(table, "/")
 }
 
 // ydbDSN builds a ydb-go-sdk connection string from endpoint and database.
