@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ydb-platform/ydb-go-sdk/v3/retry"
 )
 
 func TestFilterListSetAndString(t *testing.T) {
@@ -407,6 +411,115 @@ func TestNormalizeOutputPrefix(t *testing.T) {
 		if got != tt.want {
 			t.Fatalf("normalizeOutputPrefix(%q) = %q, want %q", tt.raw, got, tt.want)
 		}
+	}
+}
+
+func TestRemoveOutputPrefixFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	keep := filepath.Join(dir, "keep.txt")
+	otherPrefix := filepath.Join(dir, "other_000001.tsv")
+	plain := filepath.Join(dir, "extract_000001.tsv")
+	compressed := filepath.Join(dir, "extract_000002.tsv.zst")
+	notOurs := filepath.Join(dir, "extract_notes.tsv")
+	symlinkTarget := filepath.Join(dir, "secret")
+	symlinkPath := filepath.Join(dir, "extract_000003.tsv")
+
+	for _, path := range []string{keep, otherPrefix, plain, compressed, notOurs, symlinkTarget} {
+		if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(symlinkTarget, symlinkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	if err := removeOutputPrefixFiles(dir, "extract"); err != nil {
+		t.Fatalf("removeOutputPrefixFiles() error = %v", err)
+	}
+
+	mustExist := []string{keep, otherPrefix, notOurs, symlinkTarget}
+	for _, path := range mustExist {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("expected to keep %s: %v", path, err)
+		}
+	}
+	mustGone := []string{plain, compressed, symlinkPath}
+	for _, path := range mustGone {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be removed, err=%v", path, err)
+		}
+	}
+	got, err := os.ReadFile(symlinkTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "data" {
+		t.Fatalf("symlink target modified: %q", got)
+	}
+}
+
+func TestRemoveOutputPrefixFilesAllowsRerun(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "extract_000001.tsv")
+	if err := os.WriteFile(existing, []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeOutputPrefixFiles(dir, "extract"); err != nil {
+		t.Fatalf("removeOutputPrefixFiles() error = %v", err)
+	}
+	writer, err := newExtractionWriter(extractConfig{
+		OutputDir:    dir,
+		OutputPrefix: "extract",
+		MaxFileSize:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("newExtractionWriter() after cleanup error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestIsExtractRetryable(t *testing.T) {
+	t.Parallel()
+
+	if isExtractRetryable(nil) {
+		t.Fatal("nil should not be retryable")
+	}
+	if isExtractRetryable(errors.New("plain local error")) {
+		t.Fatal("plain local error should not be retryable")
+	}
+	if isExtractRetryable(context.Canceled) {
+		t.Fatal("context.Canceled should not be retryable")
+	}
+	if isExtractRetryable(context.DeadlineExceeded) {
+		t.Fatal("context.DeadlineExceeded should not be retryable")
+	}
+
+	retryable := retry.RetryableError(errors.New("transient ydb failure"), retry.WithBackoff(retry.TypeFastBackoff))
+	if !isExtractRetryable(retryable) {
+		t.Fatal("retry.RetryableError should be retryable")
+	}
+	if !isExtractRetryable(errors.Join(errors.New("wrapper"), retryable)) {
+		t.Fatal("joined retryable error should remain retryable")
+	}
+}
+
+func TestExtractRetryDelay(t *testing.T) {
+	t.Parallel()
+
+	if got := extractRetryDelay(1); got != extractRetryBaseDelay {
+		t.Fatalf("attempt 1 delay = %s, want %s", got, extractRetryBaseDelay)
+	}
+	if got := extractRetryDelay(2); got != 2*extractRetryBaseDelay {
+		t.Fatalf("attempt 2 delay = %s, want %s", got, 2*extractRetryBaseDelay)
+	}
+	if got := extractRetryDelay(100); got != extractRetryMaxDelay {
+		t.Fatalf("capped delay = %s, want %s", got, extractRetryMaxDelay)
 	}
 }
 

@@ -20,6 +20,8 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/ydb-platform/loglugger/internal/buildinfo"
 	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/retry"
+	"github.com/ydb-platform/ydb-go-sdk/v3/retry/budget"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table/result/indexed"
@@ -38,12 +40,26 @@ const (
 	// For zstd output we periodically flush to refresh compressed byte counter
 	// used by rotation, without paying per-row flush overhead.
 	zstdSizeCheckInterval = 1 << 20 // 1 MiB of plain TSV data
+
+	// Manual extraction retries replace SDK auto-retry around file writes so a
+	// transient YDB error cannot append duplicate rows into already-open files.
+	extractMaxAttempts     = 10
+	extractRetryBaseDelay  = time.Second
+	extractRetryMaxDelay   = 30 * time.Second
 )
 
 var (
 	identifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	tsvTextReplacer   = strings.NewReplacer("\t", "\\t", "\n", "\\n", "\r", "\\r")
 )
+
+// noRetryBudget denies every SDK retry attempt after the first Do() callback
+// invocation. Acquire is only called when the SDK is about to retry.
+type noRetryBudget struct{}
+
+func (noRetryBudget) Acquire(context.Context) error {
+	return budget.ErrNoQuota
+}
 
 type serverConfig struct {
 	YDBEndpoint          string `json:"ydb_endpoint" yaml:"ydb_endpoint"`
@@ -218,17 +234,6 @@ func main() {
 		}
 	}()
 
-	writer, err := newExtractionWriter(cfg)
-	if err != nil {
-		slog.Error("prepare output writer", "error", err)
-		os.Exit(1)
-	}
-	defer func() {
-		if closeErr := writer.Close(); closeErr != nil {
-			slog.Warn("close output files", "error", closeErr)
-		}
-	}()
-
 	columns, err := describeColumns(ctx, driver, cfg.YDBTable)
 	if err != nil {
 		slog.Error("describe source table", "error", err)
@@ -255,7 +260,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := runExtraction(ctx, driver, query, params, columns, writer); err != nil {
+	stats, err := runExtractionWithRetries(ctx, driver, cfg, query, params, columns)
+	if err != nil {
 		slog.Error("extract rows", "error", err)
 		os.Exit(1)
 	}
@@ -263,10 +269,12 @@ func main() {
 	slog.Info(
 		"extraction completed",
 		"version", buildinfo.Version,
-		"rows", writer.rowsWritten,
-		"files", writer.currentIndex,
-		"bytes_last_file", writer.currentSize,
-		"output_dir", writer.outputDir,
+		"rows", stats.rowsWritten,
+		"files", stats.filesWritten,
+		"bytes_last_file", stats.bytesLastFile,
+		"output_dir", cfg.OutputDir,
+		"output_prefix", cfg.OutputPrefix,
+		"attempts", stats.attempts,
 	)
 }
 
@@ -549,7 +557,87 @@ func buildQueryAndParams(cfg extractConfig, columns []string) (string, *table.Qu
 	return sql.String(), table.NewQueryParameters(paramOpts...), nil
 }
 
-func runExtraction(
+type extractionStats struct {
+	rowsWritten   int64
+	filesWritten  int
+	bytesLastFile int64
+	attempts      int
+}
+
+// runExtractionWithRetries deletes output files for the configured prefix, runs
+// a single non-auto-retried scan, and on transient YDB errors repeats the whole
+// attempt after another prefix cleanup. This keeps file output free of duplicate
+// rows from SDK callback retries and allows re-running with the same prefix
+// after a failed extraction.
+func runExtractionWithRetries(
+	ctx context.Context,
+	driver *ydb.Driver,
+	cfg extractConfig,
+	query string,
+	params *table.QueryParameters,
+	columns []string,
+) (extractionStats, error) {
+	var (
+		stats   extractionStats
+		lastErr error
+	)
+	for attempt := 1; attempt <= extractMaxAttempts; attempt++ {
+		stats.attempts = attempt
+		if err := removeOutputPrefixFiles(cfg.OutputDir, cfg.OutputPrefix); err != nil {
+			return stats, err
+		}
+
+		writer, err := newExtractionWriter(cfg)
+		if err != nil {
+			return stats, err
+		}
+
+		err = runExtractionOnce(ctx, driver, query, params, columns, writer)
+		closeErr := writer.Close()
+		if err == nil {
+			err = closeErr
+		} else if closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+
+		if err == nil {
+			stats.rowsWritten = writer.rowsWritten
+			stats.filesWritten = writer.currentIndex
+			stats.bytesLastFile = writer.currentSize
+			return stats, nil
+		}
+		lastErr = err
+
+		if attempt == extractMaxAttempts || !isExtractRetryable(err) {
+			return stats, err
+		}
+
+		delay := extractRetryDelay(attempt)
+		slog.Warn(
+			"extraction attempt failed; retrying after output prefix cleanup",
+			"attempt", attempt,
+			"max_attempts", extractMaxAttempts,
+			"retry_delay", delay.String(),
+			"output_dir", cfg.OutputDir,
+			"output_prefix", cfg.OutputPrefix,
+			"error", err,
+		)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return stats, errors.Join(ctx.Err(), lastErr)
+		case <-timer.C:
+		}
+	}
+	return stats, lastErr
+}
+
+// runExtractionOnce performs one scan-query pass without SDK auto-retry.
+// File writes are not idempotent, so table.WithIdempotent() must not wrap this
+// callback; noRetryBudget also blocks retries that remain allowed for some
+// non-idempotent YDB statuses.
+func runExtractionOnce(
 	ctx context.Context,
 	driver *ydb.Driver,
 	query string,
@@ -593,7 +681,77 @@ func runExtraction(
 			}
 		}
 		return res.Err()
-	}, table.WithIdempotent())
+	}, table.WithIdempotent(false), table.WithRetryBudget(noRetryBudget{}))
+}
+
+func isExtractRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	// Prefix cleanup makes a full re-run safe, so classify with idempotent=true
+	// (covers transport/operation statuses that SDK would only retry when marked
+	// idempotent, e.g. Unavailable).
+	return retry.Check(err).MustRetry(true)
+}
+
+func extractRetryDelay(failedAttempt int) time.Duration {
+	if failedAttempt < 1 {
+		failedAttempt = 1
+	}
+	delay := extractRetryBaseDelay << (failedAttempt - 1)
+	if delay > extractRetryMaxDelay || delay <= 0 {
+		return extractRetryMaxDelay
+	}
+	return delay
+}
+
+// removeOutputPrefixFiles deletes extractor outputs for prefix in outputDir:
+// `<prefix>_<NNNNNN>.tsv` and `<prefix>_<NNNNNN>.tsv.zst`. Used before each
+// attempt so retries and re-invocations with the same parameters start clean.
+func removeOutputPrefixFiles(outputDir, prefix string) error {
+	prefix, err := normalizeOutputPrefix(prefix)
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read output-dir %s: %w", outputDir, err)
+	}
+
+	pattern, err := regexp.Compile(`^` + regexp.QuoteMeta(prefix) + `_[0-9]{6}\.tsv(\.zst)?$`)
+	if err != nil {
+		return fmt.Errorf("compile output prefix pattern: %w", err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if !pattern.MatchString(name) {
+			continue
+		}
+		path := filepath.Join(outputDir, name)
+		// Lstat avoids following a leftover symlink into an unrelated target.
+		info, err := os.Lstat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("stat previous output file %s: %w", path, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove previous output file %s: %w", path, err)
+		}
+		slog.Info("removed previous output file", "path", path)
+	}
+	return nil
 }
 
 func newExtractionWriter(cfg extractConfig) (*extractionWriter, error) {

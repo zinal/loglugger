@@ -32,6 +32,7 @@ Notes:
 - Time filter is required (`-from`, `-to`) and is applied as `[from,to)`.
 - Optional `-filter field=v1,v2` flags add `IN` filters to SQL. Filter field names must match target table columns (see `target_table.sql`).
 - Rotation defaults: `200MiB` for plain TSV, `10MiB` with `-zstd` (override via `-max-file-size`).
+- Matching `<output-prefix>_*.tsv[.zst]` files in `-output-dir` are removed before each attempt, so a failed run can be retried with the same parameters without duplicate rows.
 
 ### Mapping Notes
 
