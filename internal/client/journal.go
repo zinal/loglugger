@@ -17,6 +17,9 @@ type JournalEntry struct {
 type JournalReader interface {
 	// SeekToPosition seeks to the given position. Empty position means start from head.
 	// It also resets the acknowledged protocol position used for batch continuity.
+	// For a non-empty journald cursor, the implementation must verify the entry
+	// still exists (sd_journal_test_cursor after seek); a stale cursor must be
+	// reported as an error so callers can reset rather than skip the nearest entry.
 	SeekToPosition(ctx context.Context, position string) error
 	// Next reads the next entry. Returns nil when no more entries (would block).
 	// Next advances the journal read cursor but does not acknowledge the entry for

@@ -84,10 +84,13 @@ func (r *journalReader) SeekToPosition(ctx context.Context, position string) err
 		r.pending = nil
 		return nil
 	}
-	if err := r.j.SeekCursor(position); err != nil {
-		return fmt.Errorf("seek cursor %q: %w", position, err)
+	// SeekCursor alone is not enough: when the entry is gone journald lands on
+	// the nearest following record and still returns success. Verify with
+	// TestCursor so a stale server position becomes a seek error (callers reset
+	// to head) instead of silently skipping the nearest surviving entry.
+	if err := advanceToExactCursor(r.j, position); err != nil {
+		return err
 	}
-	_, _ = r.j.Next()
 	r.last = position
 	r.acked = position
 	r.pending = nil
@@ -221,9 +224,12 @@ func (r *journalReader) recoverFromCursor(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := j.SeekCursor(r.last); err != nil {
+	// Confirm the last known cursor still names a real entry. If it only maps
+	// to a nearest neighbor, fail into recoverFromRealtime instead of skipping
+	// that neighbor via the Next() inside swapRecoveredJournal/readNext.
+	if err := advanceToExactCursor(j, r.last); err != nil {
 		j.Close()
-		return fmt.Errorf("seek last known cursor %q: %w", r.last, err)
+		return fmt.Errorf("resume from last known cursor %q: %w", r.last, err)
 	}
 	if err := r.swapRecoveredJournal(ctx, j); err != nil {
 		return fmt.Errorf("resume from last known cursor %q: %w", r.last, err)

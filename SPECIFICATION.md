@@ -81,9 +81,11 @@ All timestamps transferred or persisted by Loglugger as typed timestamp values a
 - **Initial state**: If the server has no stored position for the client, the client starts from head and sends `reset: true` in the first batch.
 - **Normal operation**: After a successful batch, the server stores `next_position` as the new expected position. The client does not maintain a separate persistent local position store.
 - **Read from position**: When the server returns a stored position, the client attempts to read journald starting from that position.
+- **Cursor exactness**: Resuming from a journald cursor **must** verify that the sought entry still exists, using `sd_journal_test_cursor` (or equivalent) after `sd_journal_seek_cursor` and the required positioning `sd_journal_next`. `sd_journal_seek_cursor` alone is not sufficient: when the entry has been vacuumed or rotated away, journald still returns success and lands on the nearest following entry. Treating that soft match as an exact resume would skip the nearest surviving record on the next `Next()` and violate at-least-once delivery. Cursor strings must not be compared with ordinary string equality; the same entry may have multiple cursor representations.
+- **Stale cursor handling**: If the stored cursor is missing or does not match the entry selected after seek, the client must treat the position as no longer valid: fail the seek, send `reset: true`, and restart from head (or otherwise follow the reset path below). It must not continue sequential reading from the nearest neighbor while keeping the stale protocol position.
 - **Reset condition**: The client sends `reset: true` when:
   - The server has no stored position for the client.
-  - Journal was rotated or truncated; the server-provided position is no longer valid.
+  - Journal was rotated or truncated; the server-provided position is no longer valid (including when `sd_journal_test_cursor` rejects the stored cursor).
   - The server returned `expected_position` due to mismatch and the client cannot resume from that position (e.g., journal history was lost).
   - Configuration change that invalidates position (e.g., filter mask change).
 
@@ -94,7 +96,7 @@ All timestamps transferred or persisted by Loglugger as typed timestamp values a
 - **Opt-in recovery**: When `journal_recovery` is enabled, the client may attempt best-effort recovery from corruption. This mode is disabled by default because it may skip records.
 - **Recovery strategy**: A recovery attempt should:
   - Reopen the journal with the same namespace and exact-match filters.
-  - First try to resume from the last known good cursor.
+  - First try to resume from the last known good cursor, verifying exact cursor match (`sd_journal_test_cursor`) the same way as normal position seek. A soft nearest-neighbor match is a failure of this step.
   - If that still fails, try to seek to a point just after the timestamp of the last known good entry.
 - **Recovery warning**: When recovery is enabled and corruption is detected, the client must log a warning that some data loss is possible.
 - **Recovery result**:
@@ -627,7 +629,7 @@ Each configured attribute is provided as a list. The certificate subject value m
 |----------|-----------------|-----------------|
 | Network partition | Retry with backoff; buffer batches in memory (bounded) | N/A |
 | Server restart | On startup, fetch current position from `GET /v1/positions`; then continue or reset | Position stored on server persists |
-| Journal rotation | If server-provided cursor cannot be used, send reset and restart from head | Accept with reset; update expected position |
+| Journal rotation / vacuumed cursor | If `sd_journal_seek_cursor` + `sd_journal_test_cursor` cannot confirm the server-provided cursor, treat it as invalid: send reset and restart from head (do not resume from the nearest neighbor) | Accept with reset; update expected position |
 | Journal corruption (`EBADMSG`) with recovery disabled | Log corruption, mention recovery option, and stop | Position stored on server remains unchanged |
 | Journal corruption (`EBADMSG`) with recovery enabled | Warn about possible data loss; try reopen/reseek recovery; on success resume with `reset: true`; on failure stop | Accept next successful recovery batch with reset; otherwise position stored on server remains unchanged |
 | Persistent journal read I/O errors (non-corruption, e.g. local journald failures) | Retry briefly (~15s) with short delay; if errors persist, flush any buffered batch and stop so a supervisor can restart/alert; do not retry forever while appearing healthy | Position stored on server remains unchanged until a batch is accepted |
