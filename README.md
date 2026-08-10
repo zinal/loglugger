@@ -73,6 +73,11 @@ Server configuration:
   - `max_compressed_body_bytes`: maximum raw HTTP request body size before decoding `Content-Encoding`.
   - `max_decompressed_body_bytes`: maximum decoded JSON payload size after decompression.
   - Defaults: `16777216` (16 MiB) and `33554432` (32 MiB).
+- HTTP server timeouts protect against Slowloris / stalled connections (overridable in the config file):
+  - `read_header_timeout` (default `10s`): TLS handshake + request headers.
+  - `read_timeout` (default `60s`): full request including body.
+  - `write_timeout` (default `60s`): handler processing + response write.
+  - `idle_timeout` (default `120s`): keep-alive idle connection lifetime.
 
 **Client** (Linux only):
 ```bash

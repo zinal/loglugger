@@ -2,6 +2,12 @@ listen_addr: ":27312"
 writer_backend: "mock"
 max_compressed_body_bytes: 16777216
 max_decompressed_body_bytes: 33554432
+# HTTP server timeouts (protect against Slowloris / stalled connections).
+# Defaults: read_header_timeout=10s, read_timeout=60s, write_timeout=60s, idle_timeout=120s.
+read_header_timeout: "10s"
+read_timeout: "60s"
+write_timeout: "60s"
+idle_timeout: "120s"
 position_table: "loglugger_positions"
 field_mapping_file: "examples/mappings/basic.yaml"
 

@@ -22,6 +22,10 @@ type serverConfig struct {
 	WriterBackend            string   `json:"writer_backend" yaml:"writer_backend"`
 	MaxCompressedBodyBytes   int64    `json:"max_compressed_body_bytes" yaml:"max_compressed_body_bytes"`
 	MaxDecompressedBodyBytes int64    `json:"max_decompressed_body_bytes" yaml:"max_decompressed_body_bytes"`
+	ReadHeaderTimeout        string   `json:"read_header_timeout" yaml:"read_header_timeout"`
+	ReadTimeout              string   `json:"read_timeout" yaml:"read_timeout"`
+	WriteTimeout             string   `json:"write_timeout" yaml:"write_timeout"`
+	IdleTimeout              string   `json:"idle_timeout" yaml:"idle_timeout"`
 	YDBEndpoint              string   `json:"ydb_endpoint" yaml:"ydb_endpoint"`
 	YDBDatabase              string   `json:"ydb_database" yaml:"ydb_database"`
 	YDBTable                 string   `json:"ydb_table" yaml:"ydb_table"`
@@ -40,6 +44,20 @@ type serverConfig struct {
 	TLSClientSubjectCN       []string `json:"tls_client_subject_cn" yaml:"tls_client_subject_cn"`
 	TLSClientSubjectO        []string `json:"tls_client_subject_o" yaml:"tls_client_subject_o"`
 	TLSClientSubjectOU       []string `json:"tls_client_subject_ou" yaml:"tls_client_subject_ou"`
+}
+
+const (
+	defaultReadHeaderTimeout = 10 * time.Second
+	defaultReadTimeout       = 60 * time.Second
+	defaultWriteTimeout      = 60 * time.Second
+	defaultIdleTimeout       = 120 * time.Second
+)
+
+type httpServerTimeouts struct {
+	ReadHeaderTimeout time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
 }
 
 func main() {
@@ -104,13 +122,32 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := &http.Server{
-		Addr:      cfg.ListenAddr,
-		Handler:   mux,
-		TLSConfig: tlsConfig,
+	timeouts, err := parseHTTPServerTimeouts(cfg)
+	if err != nil {
+		slog.Error("parse HTTP server timeouts", "error", err)
+		os.Exit(1)
 	}
 
-	slog.Info("starting server", "version", buildinfo.Version, "addr", cfg.ListenAddr, "writer", cfg.WriterBackend)
+	srv := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           mux,
+		TLSConfig:         tlsConfig,
+		ReadHeaderTimeout: timeouts.ReadHeaderTimeout,
+		ReadTimeout:       timeouts.ReadTimeout,
+		WriteTimeout:      timeouts.WriteTimeout,
+		IdleTimeout:       timeouts.IdleTimeout,
+	}
+
+	slog.Info(
+		"starting server",
+		"version", buildinfo.Version,
+		"addr", cfg.ListenAddr,
+		"writer", cfg.WriterBackend,
+		"read_header_timeout", timeouts.ReadHeaderTimeout,
+		"read_timeout", timeouts.ReadTimeout,
+		"write_timeout", timeouts.WriteTimeout,
+		"idle_timeout", timeouts.IdleTimeout,
+	)
 	if err := srv.ListenAndServeTLS("", ""); err != nil {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
@@ -142,11 +179,55 @@ func defaultServerConfig() serverConfig {
 		WriterBackend:            "mock",
 		MaxCompressedBodyBytes:   8 << 20,
 		MaxDecompressedBodyBytes: 32 << 20,
+		ReadHeaderTimeout:        "10s",
+		ReadTimeout:              "60s",
+		WriteTimeout:             "60s",
+		IdleTimeout:              "120s",
 		YDBTable:                 "logs",
 		YDBAuthMode:              "anonymous",
 		YDBOpenTimeout:           "10s",
 		PositionTable:            "loglugger_positions",
 	}
+}
+
+func parseHTTPServerTimeouts(cfg serverConfig) (httpServerTimeouts, error) {
+	readHeaderTimeout, err := parsePositiveDuration("read_header_timeout", cfg.ReadHeaderTimeout, defaultReadHeaderTimeout)
+	if err != nil {
+		return httpServerTimeouts{}, err
+	}
+	readTimeout, err := parsePositiveDuration("read_timeout", cfg.ReadTimeout, defaultReadTimeout)
+	if err != nil {
+		return httpServerTimeouts{}, err
+	}
+	writeTimeout, err := parsePositiveDuration("write_timeout", cfg.WriteTimeout, defaultWriteTimeout)
+	if err != nil {
+		return httpServerTimeouts{}, err
+	}
+	idleTimeout, err := parsePositiveDuration("idle_timeout", cfg.IdleTimeout, defaultIdleTimeout)
+	if err != nil {
+		return httpServerTimeouts{}, err
+	}
+	return httpServerTimeouts{
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}, nil
+}
+
+func parsePositiveDuration(name, value string, defaultValue time.Duration) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return defaultValue, nil
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", name, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
+	}
+	return d, nil
 }
 
 func loadServerConfigFile(path string, cfg *serverConfig) error {

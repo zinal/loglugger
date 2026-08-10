@@ -183,6 +183,12 @@ Content-Encoding: gzip
 - `max_compressed_body_bytes` (default **16 MiB**): maximum raw HTTP body size before decoding `Content-Encoding`.
 - `max_decompressed_body_bytes` (default **32 MiB**): maximum JSON payload size after decompression.
 
+**HTTP server timeouts**: The server sets `http.Server` timeouts to bound stalled TLS/HTTP exchanges (Slowloris-style connection exhaustion). All values are configurable and must be greater than zero:
+- `read_header_timeout` (default **10s**): TLS handshake + request headers.
+- `read_timeout` (default **60s**): entire request including body.
+- `write_timeout` (default **60s**): handler processing + response write.
+- `idle_timeout` (default **120s**): keep-alive idle connection lifetime.
+
 **Transport**: The server listens over TLS (HTTPS). It requires and verifies client certificates (mTLS) and validates client certificate subject fields (see §9).
 
 #### 5.2.2 Position Lookup Response
@@ -553,6 +559,10 @@ loglugger/
 | writer_backend | string | mock | Output backend (`mock`, `ydb`) |
 | max_compressed_body_bytes | int | 16777216 | Max raw HTTP body size before decoding `Content-Encoding` (16 MiB) |
 | max_decompressed_body_bytes | int | 33554432 | Max JSON payload size after decompression (32 MiB) |
+| read_header_timeout | duration | 10s | TLS handshake + request header read timeout |
+| read_timeout | duration | 60s | Full request read timeout (including body) |
+| write_timeout | duration | 60s | Handler processing + response write timeout |
+| idle_timeout | duration | 120s | Keep-alive idle connection timeout |
 | ydb_endpoint | string | — | YDB endpoint |
 | ydb_database | string | — | YDB database path |
 | ydb_table | string | logs | Target table name |

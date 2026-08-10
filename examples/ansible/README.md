@@ -107,6 +107,11 @@ loglugger_server_ydb_auth_login=ydb_user
 # optional
 # loglugger_server_ydb_open_timeout=20s
 # loglugger_server_ydb_ca_path=/opt/ydb/certs/ca.crt
+# HTTP server timeouts (defaults: 10s / 60s / 60s / 120s)
+# loglugger_server_read_header_timeout=10s
+# loglugger_server_read_timeout=60s
+# loglugger_server_write_timeout=60s
+# loglugger_server_idle_timeout=120s
 ```
 
 How this works:
@@ -139,6 +144,7 @@ Set these in inventory/group vars/host vars as needed:
 - `loglugger_server_ydb_auth_mode` (`anonymous` or `static`; Ansible template does not wire `service-account-key` / `metadata`)
 - `loglugger_server_ydb_auth_login`, `vault_loglugger_server_ydb_auth_password` (required for `static`; keep the latter in Ansible Vault)
 - `loglugger_server_ydb_open_timeout`, `loglugger_server_ydb_ca_path`
+- `loglugger_server_read_header_timeout` (default: `10s`), `loglugger_server_read_timeout` (default: `60s`), `loglugger_server_write_timeout` (default: `60s`), `loglugger_server_idle_timeout` (default: `120s`)
 - `loglugger_server_position_table` (default: `loglugger_positions`)
 - `loglugger_cert_dir`, `loglugger_server_tls_*`, `loglugger_client_tls_*` - certificate paths
 

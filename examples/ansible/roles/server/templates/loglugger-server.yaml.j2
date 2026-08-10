@@ -4,6 +4,10 @@ position_table: "{{ loglugger_server_position_table }}"
 field_mapping_file: "{{ loglugger_server_field_mapping_file }}"
 max_compressed_body_bytes: 16777216
 max_decompressed_body_bytes: 33554432
+read_header_timeout: "{{ loglugger_server_read_header_timeout }}"
+read_timeout: "{{ loglugger_server_read_timeout }}"
+write_timeout: "{{ loglugger_server_write_timeout }}"
+idle_timeout: "{{ loglugger_server_idle_timeout }}"
 
 ydb_endpoint: "{{ loglugger_server_ydb_endpoint }}"
 ydb_database: "{{ loglugger_server_ydb_database }}"
