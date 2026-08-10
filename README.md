@@ -1,8 +1,10 @@
 # Loglugger
 
-A two-component system for collecting records from systemd journald and storing them in a target backend (YDB or a mock backend for testing).
+A three-component system for collecting records from systemd journald, storing them in a target backend (YDB or a mock backend for testing), and extracting historical data from YDB.
 
 See [SPECIFICATION.md](SPECIFICATION.md) for the formal specification.
+
+Russian version: [README-ru.md](README-ru.md).
 
 ## Deployment Options
 
@@ -69,6 +71,7 @@ Client configuration:
 - `journal_recovery: true` enables best-effort recovery after journal corruption (`EBADMSG` / `bad message`). This mode is off by default because it may skip corrupted regions and therefore lose some data. Without it, the client logs the corruption and stops immediately.
 - `server_url` / `server_urls` configure one or more endpoints; the client keeps using the current endpoint while requests succeed and switches to the next one only after a transient failure (`5xx` or network error).
 - `tls_ca_file` and `tls_use_system_pool` control the client trust store.
+- `tls_cert_file` and `tls_key_file` provide the client certificate for mTLS (required by the server).
 - Client batches are additionally limited to 10 MB of uncompressed log data per request.
 - If a single record exceeds 10 MB, it is sent as a single-record request and is not dropped.
 - Every outgoing record includes `seqno`: a monotonically increasing client-side sequence number. The first value equals client startup time in milliseconds since Unix epoch.
@@ -212,9 +215,9 @@ Example YDB run:
 
 Notes on YDB schema and mapping:
 
-- In `examples/ydbd/target_table.sql`, `log_timestamp_us` and `ts_orig` use `Timestamp64`.
+- In `examples/ydbd/target_table.sql`, `ts_log` and `ts_orig` use `Timestamp64`.
 - In `examples/ydbd/field_mapping.yaml`, use:
-  - `transform: timestamp64_us` for microsecond Unix timestamps (e.g., `log_timestamp_us`, `realtime_ts` -> `ts_orig`)
+  - `transform: timestamp64_us` for microsecond Unix timestamps (e.g., `log_timestamp_us` -> `ts_log`, `realtime_ts` -> `ts_orig`)
   - `transform: timestamp64` for datetime strings (e.g., `parsed.P_DTTM` -> `ts_orig` in custom mappings)
 - Timezone-less values passed through `transform: timestamp64` are interpreted as UTC.
 - `message_regex`, `systemd_unit_regex`, and `message_regex_no_match` are configured on the client in YAML/JSON configuration.
