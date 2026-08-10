@@ -244,6 +244,38 @@ func TestSendBatchIgnoresContextCancellation(t *testing.T) {
 	}
 }
 
+func TestSendBatchIgnoresContextDeadlineExceeded(t *testing.T) {
+	journal := &stubJournalReader{}
+	sender := stubSender{err: context.DeadlineExceeded}
+
+	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+		CurrentPosition: "cursor-10",
+		NextPosition:    "cursor-11",
+	}, true)
+	if err != nil {
+		t.Fatalf("sendBatch() error = %v, want nil on deadline exceeded", err)
+	}
+	if !reset {
+		t.Fatal("expected reset flag preserved on interruption")
+	}
+}
+
+func TestNewShutdownFlushContextHasDeadline(t *testing.T) {
+	if shutdownFlushTimeout != 10*time.Second {
+		t.Fatalf("shutdownFlushTimeout = %v, want 10s", shutdownFlushTimeout)
+	}
+	ctx, cancel := newShutdownFlushContext()
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("shutdown flush context has no deadline")
+	}
+	remaining := time.Until(deadline)
+	if remaining < 9*time.Second || remaining > shutdownFlushTimeout {
+		t.Fatalf("deadline remaining = %v, want about %v", remaining, shutdownFlushTimeout)
+	}
+}
+
 func TestBuildClientTLSConfigRejectsNonHTTPS(t *testing.T) {
 	_, err := buildClientTLSConfig(clientConfig{
 		ServerURLs:  []string{"http://localhost:8080"},
