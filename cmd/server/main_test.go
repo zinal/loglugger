@@ -29,6 +29,18 @@ func TestDefaultServerConfigIncludesHTTPTimeouts(t *testing.T) {
 	}
 }
 
+func TestDefaultServerConfigIncludesRequestBodyLimits(t *testing.T) {
+	cfg := defaultServerConfig()
+	const wantCompressed = int64(16 << 20)
+	const wantDecompressed = int64(32 << 20)
+	if cfg.MaxCompressedBodyBytes != wantCompressed {
+		t.Fatalf("MaxCompressedBodyBytes = %d, want %d", cfg.MaxCompressedBodyBytes, wantCompressed)
+	}
+	if cfg.MaxDecompressedBodyBytes != wantDecompressed {
+		t.Fatalf("MaxDecompressedBodyBytes = %d, want %d", cfg.MaxDecompressedBodyBytes, wantDecompressed)
+	}
+}
+
 func TestParseHTTPServerTimeoutsDefaults(t *testing.T) {
 	timeouts, err := parseHTTPServerTimeouts(serverConfig{})
 	if err != nil {

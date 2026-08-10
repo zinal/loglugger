@@ -177,7 +177,7 @@ func defaultServerConfig() serverConfig {
 	return serverConfig{
 		ListenAddr:               ":27312",
 		WriterBackend:            "mock",
-		MaxCompressedBodyBytes:   8 << 20,
+		MaxCompressedBodyBytes:   16 << 20,
 		MaxDecompressedBodyBytes: 32 << 20,
 		ReadHeaderTimeout:        "10s",
 		ReadTimeout:              "60s",
