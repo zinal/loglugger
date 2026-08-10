@@ -158,3 +158,32 @@ func TestBatcher_RecoveryMessageWaitsForRealCursor(t *testing.T) {
 		t.Fatalf("positions = %q, %q, want p1, p2", batch.CurrentPosition, batch.NextPosition)
 	}
 }
+
+func TestBatcher_ShouldFlushIgnoresSyntheticInBatchSize(t *testing.T) {
+	b := NewBatcher(3, 0).(*batcher)
+
+	b.Add(&JournalEntry{Record: models.Record{Message: "synthetic"}, Position: "p0"})
+	b.Add(&JournalEntry{Record: models.Record{Message: "j1"}, Position: "p0", Cursor: "c1"})
+	b.Add(&JournalEntry{Record: models.Record{Message: "j2"}, Position: "c1", Cursor: "c2"})
+	// len(entries)=3 would previously trip ShouldFlush, but Flush counts only
+	// cursor-bearing records (realCount=2 < maxSize=3).
+	if b.ShouldFlush() {
+		t.Fatal("synthetic recovery record must not count toward batch_size")
+	}
+
+	b.Add(&JournalEntry{Record: models.Record{Message: "j3"}, Position: "c2", Cursor: "c3"})
+	if !b.ShouldFlush() {
+		t.Fatal("expected flush once journalCount reaches batch_size")
+	}
+
+	batch := b.Flush()
+	if batch == nil {
+		t.Fatal("expected flush result")
+	}
+	if len(batch.Records) != 4 {
+		t.Fatalf("len(batch.Records) = %d, want 4 (synthetic + 3 journal)", len(batch.Records))
+	}
+	if batch.CurrentPosition != "p0" || batch.NextPosition != "c3" {
+		t.Fatalf("positions = %q, %q, want p0, c3", batch.CurrentPosition, batch.NextPosition)
+	}
+}

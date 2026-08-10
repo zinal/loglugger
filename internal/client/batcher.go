@@ -121,7 +121,8 @@ func (b *batcher) ShouldFlush() bool {
 	if b.journalCount == 0 {
 		return false
 	}
-	if b.maxSize > 0 && len(b.entries) >= b.maxSize {
+	// Count only cursor-bearing journal entries, matching Flush's realCount limit.
+	if b.maxSize > 0 && b.journalCount >= b.maxSize {
 		return true
 	}
 	if b.dataBytes >= b.maxDataBytes {
