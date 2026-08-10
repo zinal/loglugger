@@ -108,4 +108,85 @@ func TestStructFieldsForRowEncodesPresentValues(t *testing.T) {
 	if len(fields) != 2 {
 		t.Fatalf("len(fields) = %d, want 2", len(fields))
 	}
+	value := types.StructValue(fields...)
+	parsed, err := types.StructFields(value)
+	if err != nil {
+		t.Fatalf("types.StructFields() error = %v", err)
+	}
+	msg := parsed["msg"]
+	if optional, _ := types.IsOptional(msg.Type()); optional {
+		t.Fatalf("non-optional column msg was wrapped as optional: %s", msg.Type().Yql())
+	}
+	var msgText string
+	if err := types.CastTo(msg, &msgText); err != nil {
+		t.Fatalf("cast msg: %v", err)
+	}
+	if msgText != "hello" {
+		t.Fatalf("msg = %q, want hello", msgText)
+	}
+}
+
+func TestStructFieldsForRowWrapsPresentNullableColumnsWithOptional(t *testing.T) {
+	t.Parallel()
+
+	ts := time.Date(2025, 3, 13, 10, 0, 0, 123456000, time.UTC)
+	columns := []options.Column{
+		{Name: "msg", Type: types.Optional(types.TypeUTF8)},
+		{Name: "ts_orig", Type: types.Optional(types.TypeTimestamp64)},
+		{Name: "hostname", Type: types.TypeUTF8},
+	}
+	row := map[string]interface{}{
+		"msg":      "hello",
+		"ts_orig":  ts,
+		"hostname": "host-01",
+	}
+
+	fields, err := structFieldsForRow(row, columns)
+	if err != nil {
+		t.Fatalf("structFieldsForRow() error = %v", err)
+	}
+	value := types.StructValue(fields...)
+	parsed, err := types.StructFields(value)
+	if err != nil {
+		t.Fatalf("types.StructFields() error = %v", err)
+	}
+
+	msg, ok := parsed["msg"]
+	if !ok {
+		t.Fatalf("missing struct field msg: %+v", parsed)
+	}
+	if types.IsNull(msg) {
+		t.Fatal("msg unexpectedly NULL")
+	}
+	if optional, inner := types.IsOptional(msg.Type()); !optional {
+		t.Fatalf("msg type = %s, want Optional(Utf8)", msg.Type().Yql())
+	} else if inner.Yql() != types.TypeUTF8.Yql() {
+		t.Fatalf("msg inner type = %s, want Utf8", inner.Yql())
+	}
+	var msgText string
+	if err := types.CastTo(types.Unwrap(msg), &msgText); err != nil {
+		t.Fatalf("cast unwrapped msg: %v", err)
+	}
+	if msgText != "hello" {
+		t.Fatalf("msg = %q, want hello", msgText)
+	}
+
+	tsOrig, ok := parsed["ts_orig"]
+	if !ok {
+		t.Fatalf("missing struct field ts_orig: %+v", parsed)
+	}
+	if types.IsNull(tsOrig) {
+		t.Fatal("ts_orig unexpectedly NULL")
+	}
+	if optional, _ := types.IsOptional(tsOrig.Type()); !optional {
+		t.Fatalf("ts_orig type = %s, want Optional(Timestamp64)", tsOrig.Type().Yql())
+	}
+
+	hostname, ok := parsed["hostname"]
+	if !ok {
+		t.Fatalf("missing struct field hostname: %+v", parsed)
+	}
+	if optional, _ := types.IsOptional(hostname.Type()); optional {
+		t.Fatalf("required hostname was wrapped as optional: %s", hostname.Type().Yql())
+	}
 }
