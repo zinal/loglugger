@@ -518,6 +518,8 @@ func (r *stubJournalReader) Next(ctx context.Context) (*client.JournalEntry, err
 	return nil, nil
 }
 
+func (r *stubJournalReader) Ack(entry *client.JournalEntry) {}
+
 func (r *stubJournalReader) Recover(ctx context.Context) (bool, error) {
 	r.recoverCalls++
 	return r.recoverReset, r.recoverErr

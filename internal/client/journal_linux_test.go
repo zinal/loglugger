@@ -7,6 +7,36 @@ import (
 	"testing"
 )
 
+func TestJournalReaderAckRestampsAndAdvances(t *testing.T) {
+	r := &journalReader{acked: "p0", last: "p0"}
+
+	skippedShape := &JournalEntry{Position: "stale", Cursor: "c-skip"}
+	// Simulate parser skip: do not Ack. Read cursor may move independently.
+	r.last = "c-skip"
+	if r.acked != "p0" {
+		t.Fatalf("acked changed without Ack: %q", r.acked)
+	}
+
+	accepted := &JournalEntry{Position: "stale-pending", Cursor: "c2"}
+	r.Ack(accepted)
+	if accepted.Position != "p0" {
+		t.Fatalf("Ack Position = %q, want p0", accepted.Position)
+	}
+	if r.acked != "c2" {
+		t.Fatalf("acked = %q, want c2", r.acked)
+	}
+
+	synthetic := &JournalEntry{Position: "x", Cursor: ""}
+	r.Ack(synthetic)
+	if synthetic.Position != "c2" {
+		t.Fatalf("synthetic Position = %q, want c2", synthetic.Position)
+	}
+	if r.acked != "c2" {
+		t.Fatalf("acked advanced on empty Cursor: %q", r.acked)
+	}
+	_ = skippedShape
+}
+
 func TestRecoveryJournalEntryIncludesMessage(t *testing.T) {
 	entry := newRecoveryJournalEntry("p1", 1000)
 	if entry == nil {
