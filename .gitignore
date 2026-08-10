@@ -26,6 +26,9 @@ coverage.out
 *.key
 *.srl
 
+# Local Ansible secrets
+/examples/ansible/group_vars/loglugger_server/vault.yml
+
 # Editor temp files
 *.swp
 *.swo

@@ -8,6 +8,8 @@ English version: [README.md](README.md).
 - `client` устанавливает и запускает `loglugger-client`
 
 По умолчанию обе роли используют сертификаты YDB из `/opt/ydb/certs`.
+Конфигурационный файл сервера устанавливается с правами `0600`, чтобы пароль
+YDB не был доступен всем локальным пользователям.
 
 ## Файлы
 
@@ -48,11 +50,27 @@ English version: [README.md](README.md).
 cp inventory.example.ini inventory.ini
 ```
 
+Для статической аутентификации YDB создайте и зашифруйте файл с паролем:
+
+```bash
+cp group_vars/loglugger_server/vault.yml.example \
+  group_vars/loglugger_server/vault.yml
+# Замените change_me в vault.yml, затем зашифруйте файл:
+ansible-vault encrypt group_vars/loglugger_server/vault.yml
+```
+
+Локальный путь `vault.yml` добавлен в `.gitignore`. Не указывайте пароль
+непосредственно в `inventory.ini`, незашифрованном файле переменных или через
+extra vars командной строки.
+
 Запустите плейбук из этого каталога:
 
 ```bash
-ansible-playbook -i inventory.ini -f 50 playbook.yml
+ansible-playbook -i inventory.ini -f 50 playbook.yml --ask-vault-pass
 ```
+
+Вместо интерактивного ввода можно использовать `--vault-password-file`. Для
+анонимной аутентификации YDB без Vault-файла параметр Vault не нужен.
 
 ## Настройка YDB и портов
 
@@ -86,7 +104,7 @@ loglugger_server_ydb_database=/Root/logdb
 loglugger_server_ydb_table=ydblogs
 loglugger_server_ydb_auth_mode=static
 loglugger_server_ydb_auth_login=ydb_user
-loglugger_server_ydb_auth_password=change_me
+# Пароль загружается из зашифрованного group_vars/loglugger_server/vault.yml.
 # необязательно
 # loglugger_server_ydb_open_timeout=20s
 # loglugger_server_ydb_ca_path=/opt/ydb/certs/ca.crt
@@ -97,7 +115,7 @@ loglugger_server_ydb_auth_password=change_me
 - `loglugger_server_listen_addr` задаёт порт привязки сервера.
 - клиенты собирают `server_urls` из хостов группы `loglugger_server` по схеме `loglugger_client_server_scheme` + host + `loglugger_client_server_port`.
 - параметры подключения к YDB берутся из переменных `loglugger_server_ydb_*`.
-- при `loglugger_server_ydb_auth_mode=static` нужно задать и `loglugger_server_ydb_auth_login`, и `loglugger_server_ydb_auth_password`; роль проверяет это через Ansible assert.
+- при `loglugger_server_ydb_auth_mode=static` нужно задать логин, а `vault_loglugger_server_ydb_auth_password` загрузить из зашифрованного Vault-файла; роль проверяет итоговые учётные данные, не выводя их в лог.
 - если нужен фиксированный список серверов вместо URL из inventory, задайте `loglugger_client_server_urls` (или `loglugger_client_server_urls_override` в `playbook.yml`).
 
 Замечание по сопоставлению таблицы YDB:
@@ -120,7 +138,7 @@ loglugger_server_ydb_auth_password=change_me
 - `loglugger_client_journal_recovery` (по умолчанию: `true`)
 - `loglugger_server_ydb_endpoint`, `loglugger_server_ydb_database`, `loglugger_server_ydb_table`
 - `loglugger_server_ydb_auth_mode` (`anonymous` или `static`; шаблон Ansible не подключает `service-account-key` / `metadata`)
-- `loglugger_server_ydb_auth_login`, `loglugger_server_ydb_auth_password` (обязательны для `static`)
+- `loglugger_server_ydb_auth_login`, `vault_loglugger_server_ydb_auth_password` (обязательны для `static`; пароль храните в Ansible Vault)
 - `loglugger_server_ydb_open_timeout`, `loglugger_server_ydb_ca_path`
 - `loglugger_server_position_table` (по умолчанию: `loglugger_positions`)
 - `loglugger_cert_dir`, `loglugger_server_tls_*`, `loglugger_client_tls_*` — пути к сертификатам

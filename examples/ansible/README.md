@@ -8,6 +8,8 @@ This example installs Loglugger with two roles:
 - `client` installs and starts `loglugger-client`
 
 By default, both roles use YDB certificates from `/opt/ydb/certs`.
+The server configuration file is installed with mode `0600` so a YDB password
+is not world-readable.
 
 ## Files
 
@@ -48,11 +50,26 @@ Copy and adjust the inventory:
 cp inventory.example.ini inventory.ini
 ```
 
+For static YDB authentication, create and encrypt the password variables file:
+
+```bash
+cp group_vars/loglugger_server/vault.yml.example \
+  group_vars/loglugger_server/vault.yml
+# Replace change_me in vault.yml, then encrypt the file:
+ansible-vault encrypt group_vars/loglugger_server/vault.yml
+```
+
+The local `vault.yml` path is ignored by Git. Do not put the password directly
+in `inventory.ini`, command-line extra vars, or an unencrypted variables file.
+
 Run the playbook from this directory:
 
 ```bash
-ansible-playbook -i inventory.ini -f 50 playbook.yml
+ansible-playbook -i inventory.ini -f 50 playbook.yml --ask-vault-pass
 ```
+
+`--vault-password-file` can be used instead of the interactive prompt. When
+using anonymous YDB authentication and no Vault file, omit the Vault option.
 
 ## Configure YDB and ports
 
@@ -86,7 +103,7 @@ loglugger_server_ydb_database=/Root/logdb
 loglugger_server_ydb_table=ydblogs
 loglugger_server_ydb_auth_mode=static
 loglugger_server_ydb_auth_login=ydb_user
-loglugger_server_ydb_auth_password=change_me
+# The password comes from the encrypted group_vars/loglugger_server/vault.yml.
 # optional
 # loglugger_server_ydb_open_timeout=20s
 # loglugger_server_ydb_ca_path=/opt/ydb/certs/ca.crt
@@ -97,7 +114,7 @@ How this works:
 - `loglugger_server_listen_addr` controls the server bind port.
 - clients build `server_urls` from hosts in `loglugger_server` using `loglugger_client_server_scheme` + host + `loglugger_client_server_port`.
 - YDB connection parameters come from `loglugger_server_ydb_*` variables.
-- when `loglugger_server_ydb_auth_mode=static`, you must define both `loglugger_server_ydb_auth_login` and `loglugger_server_ydb_auth_password`; the role validates this with an Ansible assert.
+- when `loglugger_server_ydb_auth_mode=static`, the login must be set and `vault_loglugger_server_ydb_auth_password` must come from the encrypted Vault file; the role validates the resulting credentials without logging them.
 - if you want a fixed server list instead of inventory-derived URLs, set `loglugger_client_server_urls` (or `loglugger_client_server_urls_override` in `playbook.yml`).
 
 YDB table mapping note:
@@ -120,7 +137,7 @@ Set these in inventory/group vars/host vars as needed:
 - `loglugger_client_journal_recovery` (default: `true`)
 - `loglugger_server_ydb_endpoint`, `loglugger_server_ydb_database`, `loglugger_server_ydb_table`
 - `loglugger_server_ydb_auth_mode` (`anonymous` or `static`; Ansible template does not wire `service-account-key` / `metadata`)
-- `loglugger_server_ydb_auth_login`, `loglugger_server_ydb_auth_password` (required for `static`)
+- `loglugger_server_ydb_auth_login`, `vault_loglugger_server_ydb_auth_password` (required for `static`; keep the latter in Ansible Vault)
 - `loglugger_server_ydb_open_timeout`, `loglugger_server_ydb_ca_path`
 - `loglugger_server_position_table` (default: `loglugger_positions`)
 - `loglugger_cert_dir`, `loglugger_server_tls_*`, `loglugger_client_tls_*` - certificate paths

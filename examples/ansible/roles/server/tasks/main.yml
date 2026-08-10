@@ -8,6 +8,7 @@
       loglugger_server_ydb_auth_mode=static requires both
       loglugger_server_ydb_auth_login and loglugger_server_ydb_auth_password.
   when: loglugger_server_ydb_auth_mode == "static"
+  no_log: true
 
 - name: Create Loglugger directories
   ansible.builtin.file:
@@ -29,8 +30,9 @@
   ansible.builtin.template:
     src: loglugger-server.yaml.j2
     dest: "{{ loglugger_prefix }}/config/loglugger-server.yaml"
-    mode: "0644"
+    mode: "0600"
   notify: Restart loglugger-server
+  no_log: true
 
 - name: Install field mapping config
   ansible.builtin.template:

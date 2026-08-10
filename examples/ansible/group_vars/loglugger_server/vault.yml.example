@@ -1,0 +1,4 @@
+---
+# Copy this file to vault.yml, replace the placeholder, and encrypt it with:
+# ansible-vault encrypt group_vars/loglugger_server/vault.yml
+vault_loglugger_server_ydb_auth_password: change_me
