@@ -138,7 +138,7 @@ When `message_regex` is configured, the client also supports multiline merge:
 - **Multiple servers**: The client may be configured with multiple server base URLs. Endpoint selection is **sticky**: the client keeps using the current endpoint while requests succeed, and switches to the next endpoint only after a transient failure (network error or 5xx) during retry. As servers are stateless, they are expected to be connected to the same backing database.
 - **Retries**: Implement endless retry with exponential backoff for transient failures (5xx, network errors) so batches are not dropped during prolonged outages. Do not retry on 4xx (except possibly 409 with position mismatch—see server spec). On non-retryable 4xx after a batch has been flushed from the in-memory buffer, the client must stop rather than continue reading journald; otherwise the flushed batch would be skipped (especially dangerous when the next send uses `reset: true`).
 - **Timeout**: Configurable request timeout.
-- **Client identification**: Each client instance should have a unique identifier (e.g., hostname + instance ID) for server-side position tracking.
+- **Client identification**: Each client instance must be configured with a distinct `client_id` (e.g., hostname + instance ID) for server-side position tracking. Uniqueness is an operational/configuration prerequisite; see §5.3.1.
 
 ---
 
@@ -198,7 +198,7 @@ Content-Type: application/json
 
 ```json
 {
-  "client_id": "string",           // Required. Unique identifier for the client.
+  "client_id": "string",           // Required. Client identifier; uniqueness is an operational prerequisite (see §5.3.1), not enforced by the server.
   "reset": false,                  // Optional. Default: false. If true, skip position validation.
   "current_position": "string",    // Required if reset is false. Position at batch start.
   "next_position": "string",       // Required. Position after last record in batch.
@@ -275,7 +275,21 @@ RETURN 200 with next_position
 
 **Durability requirement**: The server **must write log records before updating the stored position**. This ordering is required to avoid the risk of losing records by advancing the position past data that was not successfully persisted.
 
-**Concurrency requirement**: The server **must support concurrent processing of requests from different clients**. Implementations must avoid global serialization of all batch requests, and must preserve per-client position safety under concurrent load.
+**Concurrency requirement**: The server **must support concurrent processing of requests from different clients**. Implementations must avoid global serialization of all batch requests, and must preserve per-client position safety under concurrent load when each `client_id` has a single active sender (the intended deployment model).
+
+### 5.3.1 `client_id` Uniqueness (Out of Scope)
+
+Ensuring uniqueness of `client_id` across client instances is **not considered and not solved** by this protocol or by the server in the current version. The server does not detect, reject, or coordinate multiple senders that share the same `client_id`. Operators are responsible for assigning a distinct `client_id` to each client instance.
+
+The position-tracking protocol assumes **at most one active sender per `client_id`**. If that assumption is violated—whether by misconfiguration, accidental reuse of the same `client_id`, a duplicate deployment, a buggy client that issues parallel batch submits for one `client_id`, or an external replay/proxy that duplicates in-flight requests—the following problems are **inevitable** and are not treated as defects relative to this specification:
+
+1. **Position races**: Concurrent `POST /v1/batches` for the same `client_id` may both pass the position check before either updates the stored expected position.
+2. **Writes visible with `409 position_mismatch`**: Because records are written before the position update (§5.3 durability requirement), a request that later loses the position update may already have persisted rows, yet still return `409 position_mismatch`.
+3. **Interleaved position streams**: Independent journal readers sharing one `client_id` advance a single shared expected position, producing non-contiguous / mutually invalid `current_position` values from each sender’s point of view.
+4. **Duplicate or overwritten rows**: Retries or competing batches may insert duplicates (if the table primary key does not cover the colliding rows) or silently overwrite via idempotent BulkUpsert (if it does)—exactly-once delivery is not guaranteed under shared `client_id`.
+5. **Lost progress for a competing sender**: When one sender successfully updates the shared expected position, other senders using the same `client_id` observe mismatches and must reset or reseek, potentially skipping or re-sending data.
+
+Mitigation of these outcomes (for example global or per-client request locking, transactional write+position commit, or server-side uniqueness enforcement) is **out of scope** for the current version.
 
 ### 5.4 YDB Integration
 
@@ -487,7 +501,7 @@ loglugger/
 |-----------|------|---------|-------------|
 | server_urls | string/list | — | One or more server base URLs (must use `https://`); list or comma-separated string |
 | server_url | string | — | Single server base URL (comma-separated values are allowed) |
-| client_id | string | hostname | Unique client identifier |
+| client_id | string | hostname | Client identifier; must be unique per client instance (not enforced by server; see §5.3.1) |
 | service_mask | string | "" | Filter mask for `_SYSTEMD_UNIT` (empty = no filter) |
 | journal_recovery | bool | false | Enable best-effort recovery from journal corruption (`EBADMSG` / "bad message"); may skip records and therefore may lose data |
 | message_regex | string | "" | Regex with named groups for client-side `message` parsing |
@@ -605,6 +619,7 @@ Each configured attribute is provided as a list. The certificate subject value m
 | YDB unavailable | Client retries; server returns 5xx | Fail batch; do not update position |
 | Non-retryable HTTP 4xx on batch submit (e.g. 400/401/403/404/422) | Do not retry; stop the process after logging the error so the already-flushed batch is not skipped; on restart, resume from the server-stored position | Reject batch; do not update position |
 | Duplicate batch (retry) | Client may retry same batch | Idempotent BulkUpsert; position already updated—reject with 409 if current_position no longer matches |
+| Duplicate / shared `client_id` (misconfiguration or concurrent senders) | Not supported; competing senders will observe intermittent `409`, resets, and possible data duplication or gaps | No uniqueness enforcement; position races and write-before-409 outcomes as described in §5.3.1 are expected |
 
 ---
 
