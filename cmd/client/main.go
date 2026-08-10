@@ -150,7 +150,7 @@ func main() {
 	emptyReads := 0
 	var emptySince time.Time
 	var journalReadFailSince time.Time
-	processEntry := func(entry *client.JournalEntry) error {
+	processEntry := func(sendCtx context.Context, entry *client.JournalEntry) error {
 		if entry == nil {
 			return nil
 		}
@@ -167,7 +167,7 @@ func main() {
 			if batch := batcher.Flush(); batch != nil {
 				slog.Debug("flush by batch limit", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
 				var sendErr error
-				reset, sendErr = sendBatch(ctx, journal, sender, batch, reset)
+				reset, sendErr = sendBatch(sendCtx, journal, sender, batch, reset)
 				if sendErr != nil {
 					return sendErr
 				}
@@ -180,7 +180,7 @@ func main() {
 			return nil
 		}
 		if ready := multilineMerger.DrainExpired(now); ready != nil {
-			return processEntry(ready)
+			return processEntry(ctx, ready)
 		}
 		return nil
 	}
@@ -189,14 +189,20 @@ func main() {
 		os.Exit(1)
 	}
 	shutdown := func() {
+		// Final flush must not inherit the long-lived run context: on journal
+		// fail-stop that context is still open, and Sender retries forever while
+		// the server is down — blocking os.Exit and supervisor restart. Use a
+		// dedicated deadline so shutdown always completes.
+		flushCtx, cancelFlush := newShutdownFlushContext()
+		defer cancelFlush()
 		if multilineMerger != nil {
-			if err := processEntry(multilineMerger.Drain()); err != nil {
+			if err := processEntry(flushCtx, multilineMerger.Drain()); err != nil {
 				stopOnSendFailure(err)
 			}
 		}
 		if batch := batcher.Flush(); batch != nil {
 			slog.Debug("flush on shutdown", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
-			if _, err := sendBatch(ctx, journal, sender, batch, reset); err != nil {
+			if _, err := sendBatch(flushCtx, journal, sender, batch, reset); err != nil {
 				stopOnSendFailure(err)
 			}
 		}
@@ -310,13 +316,13 @@ func main() {
 		if multilineMerger != nil {
 			ready := multilineMerger.Add(entry, time.Now())
 			for _, merged := range ready {
-				if err := processEntry(merged); err != nil {
+				if err := processEntry(ctx, merged); err != nil {
 					stopOnSendFailure(err)
 				}
 			}
 			continue
 		}
-		if err := processEntry(entry); err != nil {
+		if err := processEntry(ctx, entry); err != nil {
 			stopOnSendFailure(err)
 		}
 	}
@@ -343,7 +349,15 @@ func parseClientConfig() (clientConfig, error) {
 const (
 	journalReadRetryDelay         = 100 * time.Millisecond
 	maxJournalReadFailureDuration = 15 * time.Second
+	shutdownFlushTimeout          = 10 * time.Second
 )
+
+// newShutdownFlushContext returns a context for the final batch flush on
+// shutdown. It is independent of the run context so a cancelled signal context
+// or an still-open fail-stop path cannot leave Sender retrying forever.
+func newShutdownFlushContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), shutdownFlushTimeout)
+}
 
 // journalReadFailureBudgetExceeded reports whether non-corruption journal read
 // errors have persisted long enough that the client should stop rather than
