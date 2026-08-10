@@ -655,8 +655,9 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 			slog.Warn("unable to seek to expected journal position; resetting to head", "expected_position", resp.ExpectedPosition)
 		}
 		if err := journal.SeekToPosition(ctx, ""); err != nil {
-			slog.Error("seek head after mismatch", "error", err)
-			return true, true, nil
+			// Do not report streamRestarted: the journal was not repositioned, so
+			// the caller must not discard buffers and continue from an unknown offset.
+			return reset, false, fmt.Errorf("seek head after position mismatch failed: %w", err)
 		}
 		return true, true, nil
 	}

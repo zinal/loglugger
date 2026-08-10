@@ -151,6 +151,65 @@ func TestSendBatchFallsBackToResetOnSeekFailure(t *testing.T) {
 	}
 }
 
+func TestSendBatchFailsWhenFallbackHeadSeekFails(t *testing.T) {
+	journal := &stubJournalReader{failPositions: map[string]bool{
+		"cursor-42": true,
+		"":          true,
+	}}
+	sender := stubSender{
+		resp: &models.BatchResponse{
+			Status:           "position_mismatch",
+			ExpectedPosition: "cursor-42",
+		},
+	}
+
+	reset, streamRestarted, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+		CurrentPosition: "cursor-10",
+		NextPosition:    "cursor-11",
+	}, false)
+	if err == nil {
+		t.Fatal("expected error when fallback head seek fails")
+	}
+	if !strings.Contains(err.Error(), "seek head after position mismatch failed") {
+		t.Fatalf("error = %q, want head-seek failure", err)
+	}
+	if reset {
+		t.Fatal("expected incoming reset preserved when stream was not restarted")
+	}
+	if streamRestarted {
+		t.Fatal("expected streamRestarted=false when journal was not repositioned")
+	}
+	if len(journal.seekCalls) != 2 {
+		t.Fatalf("seek calls = %v, want reseek then head", journal.seekCalls)
+	}
+	if journal.seekCalls[0] != "cursor-42" || journal.seekCalls[1] != "" {
+		t.Fatalf("seek calls = %v, want [cursor-42 \"\"]", journal.seekCalls)
+	}
+}
+
+func TestSendBatchFailsWhenHeadSeekFailsWithoutExpectedPosition(t *testing.T) {
+	journal := &stubJournalReader{failPositions: map[string]bool{"": true}}
+	sender := stubSender{
+		resp: &models.BatchResponse{
+			Status: "position_mismatch",
+		},
+	}
+
+	_, streamRestarted, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+		CurrentPosition: "cursor-10",
+		NextPosition:    "cursor-11",
+	}, true)
+	if err == nil {
+		t.Fatal("expected error when head seek fails")
+	}
+	if streamRestarted {
+		t.Fatal("expected streamRestarted=false when journal was not repositioned")
+	}
+	if len(journal.seekCalls) != 1 || journal.seekCalls[0] != "" {
+		t.Fatalf("seek calls = %v, want [\"\"]", journal.seekCalls)
+	}
+}
+
 func TestSendBatchReturnsErrorOnUnexpectedStatus(t *testing.T) {
 	journal := &stubJournalReader{}
 	sender := stubSender{

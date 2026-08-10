@@ -29,6 +29,7 @@ High-level changes on `main` since the `v1.0` tag.
 
 ### Fixed
 
+- After HTTP `409` position mismatch, if both the seek to `expected_position` and the fallback seek to journal head fail, the client fail-stops instead of continuing with `streamRestarted` from an unrepositioned journal.
 - After successful journal corruption recovery, the client retains and flushes any already-buffered unsent batcher records (and keeps unfinished multiline state) with `reset: true`, instead of discarding them. Recovery resumes after the last read cursor, so clearing that buffer could permanently drop records that journald will not re-emit.
 - After HTTP `409` position mismatch (reseek/reset), the client discards any unsent batcher remainder and unfinished multiline state left by JSON/count splits, so stale `current_position` values cannot trigger repeated `409`s or corrupt a reset batch.
 - Client no longer busy-polls under a continuous journald stream; non-corruption `GetEntry` failures are skipped without bypassing recovery paths.
