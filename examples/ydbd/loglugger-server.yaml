@@ -5,6 +5,11 @@ writer_backend: "ydb"
 # max_decompressed_body_bytes limits decoded JSON payload size.
 max_compressed_body_bytes: 16777216
 max_decompressed_body_bytes: 33554432
+# HTTP server timeouts (defaults: 10s / 60s / 60s / 120s).
+read_header_timeout: "10s"
+read_timeout: "60s"
+write_timeout: "60s"
+idle_timeout: "120s"
 position_table: "loglugger_positions"
 field_mapping_file: "/opt/ydb/loglugger/config/field_mapping.yaml"
 

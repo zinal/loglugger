@@ -108,6 +108,11 @@ loglugger_server_ydb_auth_login=ydb_user
 # необязательно
 # loglugger_server_ydb_open_timeout=20s
 # loglugger_server_ydb_ca_path=/opt/ydb/certs/ca.crt
+# Таймауты HTTP-сервера (по умолчанию: 10s / 60s / 60s / 120s)
+# loglugger_server_read_header_timeout=10s
+# loglugger_server_read_timeout=60s
+# loglugger_server_write_timeout=60s
+# loglugger_server_idle_timeout=120s
 ```
 
 Как это работает:
@@ -140,6 +145,7 @@ loglugger_server_ydb_auth_login=ydb_user
 - `loglugger_server_ydb_auth_mode` (`anonymous` или `static`; шаблон Ansible не подключает `service-account-key` / `metadata`)
 - `loglugger_server_ydb_auth_login`, `vault_loglugger_server_ydb_auth_password` (обязательны для `static`; пароль храните в Ansible Vault)
 - `loglugger_server_ydb_open_timeout`, `loglugger_server_ydb_ca_path`
+- `loglugger_server_read_header_timeout` (по умолчанию: `10s`), `loglugger_server_read_timeout` (по умолчанию: `60s`), `loglugger_server_write_timeout` (по умолчанию: `60s`), `loglugger_server_idle_timeout` (по умолчанию: `120s`)
 - `loglugger_server_position_table` (по умолчанию: `loglugger_positions`)
 - `loglugger_cert_dir`, `loglugger_server_tls_*`, `loglugger_client_tls_*` — пути к сертификатам
 
