@@ -138,6 +138,7 @@ When `message_regex` is configured, the client also supports multiline merge:
   - `GET` for startup position lookup.
   - `POST` for batch submission.
 - **Content-Type**: `application/json` for batch submission.
+- **Content-Encoding**: `gzip` for batch submission. The client **must** gzip-compress the JSON request body and set `Content-Encoding: gzip` on `POST /v1/batches` (see §4.5 for the related uncompressed payload limit).
 - **Endpoints**:
   - Position lookup: `GET /v1/positions?client_id=<client_id>`
   - Batch submit: `POST /v1/batches`
@@ -169,7 +170,10 @@ GET /v1/positions?client_id=<client_id>
 
 POST /v1/batches
 Content-Type: application/json
+Content-Encoding: gzip
 ```
+
+**Batch body encoding**: Clients **must** send the JSON batch body gzip-compressed with `Content-Encoding: gzip` (§4.6). The server **must** accept `gzip`. For interoperability with ad-hoc clients and proxies, the server also accepts an uncompressed body when `Content-Encoding` is omitted or set to `identity`; any other `Content-Encoding` value is rejected.
 
 **Transport**: The server listens over TLS (HTTPS). It requires and verifies client certificates (mTLS) and validates client certificate subject fields (see §9).
 
