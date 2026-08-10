@@ -576,6 +576,15 @@ func (s stubSender) Send(ctx context.Context, req *models.BatchRequest) (*models
 	return s.resp, s.err
 }
 
+func (s stubSender) SendBatch(ctx context.Context, batch *client.Batch, reset bool) (*models.BatchResponse, error) {
+	return s.Send(ctx, &models.BatchRequest{
+		Reset:           reset,
+		CurrentPosition: batch.CurrentPosition,
+		NextPosition:    batch.NextPosition,
+		Records:         batch.Records,
+	})
+}
+
 func (s stubSender) CurrentPosition(ctx context.Context) (*models.PositionResponse, error) {
 	return s.positionResp, s.err
 }

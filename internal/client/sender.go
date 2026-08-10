@@ -22,6 +22,7 @@ import (
 // Sender sends batches to the server via HTTP.
 type Sender interface {
 	Send(ctx context.Context, req *models.BatchRequest) (*models.BatchResponse, error)
+	SendBatch(ctx context.Context, batch *Batch, reset bool) (*models.BatchResponse, error)
 	CurrentPosition(ctx context.Context) (*models.PositionResponse, error)
 }
 
@@ -110,6 +111,26 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
+	return s.sendCompressedJSON(ctx, body)
+}
+
+// SendBatch sends a batch using record JSON produced during batching, without
+// re-marshaling individual records.
+func (s *sender) SendBatch(ctx context.Context, batch *Batch, reset bool) (*models.BatchResponse, error) {
+	if len(s.endpoints) == 0 {
+		return nil, fmt.Errorf("no server endpoints configured")
+	}
+	if batch == nil {
+		return nil, fmt.Errorf("batch is nil")
+	}
+	body, err := encodeBatchRequestJSON(s.clientID, reset, batch.CurrentPosition, batch.NextPosition, batch.RecordJSONs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	return s.sendCompressedJSON(ctx, body)
+}
+
+func (s *sender) sendCompressedJSON(ctx context.Context, body []byte) (*models.BatchResponse, error) {
 	compressedBody, err := compressJSON(body)
 	if err != nil {
 		return nil, fmt.Errorf("compress request: %w", err)

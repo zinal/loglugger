@@ -26,7 +26,7 @@ type Handler struct {
 }
 
 const (
-	defaultMaxCompressedBodyBytes   int64 = 8 << 20  // 8 MiB
+	defaultMaxCompressedBodyBytes   int64 = 16 << 20 // 16 MiB
 	defaultMaxDecompressedBodyBytes int64 = 32 << 20 // 32 MiB
 	genericStorageErrorMessage            = "internal storage error"
 )
