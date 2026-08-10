@@ -41,7 +41,13 @@ rebuild with a portable client binary (Ubuntu 20.04 / glibc 2.31 baseline):
 # LOGLUGGER_PORTABLE=1 ./build.sh
 ```
 
-Then redeploy the binaries from `./bin`.
+To build a portable distribution archive (binaries, docs, examples, and Ansible playbooks) into `dist/`:
+
+```bash
+./build-ditto.sh
+```
+
+Then redeploy the binaries from `./bin` (or unpack the archive from `dist/`).
 
 This repository vendors a fork of `github.com/coreos/go-systemd/v22` under `third_party/go-systemd` and uses it via a local `replace` in `go.mod`. The fork adds native journald namespace support (`sd_journal_open_namespace`), which is required for reliable reading from non-default namespaces.
 
