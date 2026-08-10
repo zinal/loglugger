@@ -1,6 +1,8 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ydb-platform/loglugger/internal/models"
@@ -44,5 +46,32 @@ func TestMapperMapsClientIDToCustomDestination(t *testing.T) {
 	}
 	if _, has := row["client_id"]; has {
 		t.Fatalf("row contains unexpected client_id: %+v", row)
+	}
+}
+
+func TestLoadFieldMappingsJSONArrayAndEmpty(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mapping.json")
+	if err := os.WriteFile(path, []byte(`[
+		{"source":"message","destination":"msg","transform":"string"}
+	]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mappings, err := LoadFieldMappings(path)
+	if err != nil {
+		t.Fatalf("LoadFieldMappings() error = %v", err)
+	}
+	if len(mappings) != 1 || mappings[0].Source != "message" || mappings[0].Destination != "msg" {
+		t.Fatalf("mappings = %#v", mappings)
+	}
+
+	emptyPath := filepath.Join(dir, "empty.yaml")
+	if err := os.WriteFile(emptyPath, []byte("field_mapping: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFieldMappings(emptyPath); err == nil {
+		t.Fatal("expected error for empty mapping file")
 	}
 }

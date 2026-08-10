@@ -355,6 +355,18 @@ func writeTempClientConfig(t *testing.T, contents string) string {
 	return path
 }
 
+func TestIsJournalCorruption(t *testing.T) {
+	if !isJournalCorruption(syscall.EBADMSG) {
+		t.Fatal("EBADMSG should be treated as journal corruption")
+	}
+	if isJournalCorruption(context.Canceled) {
+		t.Fatal("context.Canceled should not be treated as journal corruption")
+	}
+	if isJournalCorruption(nil) {
+		t.Fatal("nil error should not be treated as journal corruption")
+	}
+}
+
 func TestRecoverFromJournalCorruptionDisabled(t *testing.T) {
 	_, err := recoverFromJournalCorruption(context.Background(), &stubJournalReader{}, false)
 	if err == nil {

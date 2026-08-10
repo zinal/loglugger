@@ -395,3 +395,32 @@ func TestSenderSetsTLSHostPerEndpoint(t *testing.T) {
 }
 
 var tlsConfigWithMinVersion12 = tls.Config{MinVersion: tls.VersionTLS12}
+
+func TestRetryDelayForAttempt(t *testing.T) {
+	t.Parallel()
+
+	if got := retryDelayForAttempt(0, 3); got != 0 {
+		t.Fatalf("zero base delay = %v, want 0", got)
+	}
+	if got := retryDelayForAttempt(time.Millisecond, 1); got != time.Millisecond {
+		t.Fatalf("attempt 1 = %v, want 1ms", got)
+	}
+	if got := retryDelayForAttempt(time.Millisecond, 2); got != 2*time.Millisecond {
+		t.Fatalf("attempt 2 = %v, want 2ms", got)
+	}
+	if got := retryDelayForAttempt(time.Millisecond, 3); got != 4*time.Millisecond {
+		t.Fatalf("attempt 3 = %v, want 4ms", got)
+	}
+	if got := retryDelayForAttempt(maxRetryBackoff, 5); got != maxRetryBackoff {
+		t.Fatalf("capped delay = %v, want %v", got, maxRetryBackoff)
+	}
+}
+
+func TestErrClientErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	err := ErrClientError{Message: "bad request"}
+	if got := err.Error(); got != "client error: bad request" {
+		t.Fatalf("Error() = %q, want %q", got, "client error: bad request")
+	}
+}

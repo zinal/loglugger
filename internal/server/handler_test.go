@@ -345,6 +345,56 @@ func TestHandler_WriteFailureDoesNotAdvancePosition(t *testing.T) {
 	}
 }
 
+func TestHandler_SetPositionRaceReturnsPositionMismatch(t *testing.T) {
+	writer := positionWriterStub{
+		getPos: "pos-a",
+		getOK:  true,
+		setErr: &PositionMismatchError{CurrentPosition: "pos-b", Found: true},
+	}
+	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), writer, "logs")
+
+	req := &models.BatchRequest{
+		ClientID:        "client-1",
+		CurrentPosition: "pos-a",
+		NextPosition:    "pos-c",
+		Records:         []models.Record{{Message: "hello"}},
+	}
+	body, _ := json.Marshal(req)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", w.Code)
+	}
+	var resp models.BatchResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != "position_mismatch" {
+		t.Fatalf("status = %q, want position_mismatch", resp.Status)
+	}
+	if resp.ExpectedPosition != "pos-b" {
+		t.Fatalf("expected_position = %q, want pos-b", resp.ExpectedPosition)
+	}
+}
+
+func TestPositionMismatchErrorString(t *testing.T) {
+	err := &PositionMismatchError{CurrentPosition: "pos-x", Found: true}
+	if got := err.Error(); !strings.Contains(got, "pos-x") {
+		t.Fatalf("Error() = %q, want it to mention pos-x", got)
+	}
+	missing := &PositionMismatchError{Found: false}
+	if got := missing.Error(); !strings.Contains(got, "no current position") {
+		t.Fatalf("Error() = %q, want missing-position message", got)
+	}
+	var nilErr *PositionMismatchError
+	if got := nilErr.Error(); got != "position mismatch" {
+		t.Fatalf("nil Error() = %q, want position mismatch", got)
+	}
+}
+
 func TestHandler_PositionStoreErrorReturnsFailure(t *testing.T) {
 	handler := NewHandler(NewMapper([]FieldMapping{{Source: "message", Destination: "msg"}}), positionWriterStub{resetErr: errors.New("store failed")}, "logs")
 
