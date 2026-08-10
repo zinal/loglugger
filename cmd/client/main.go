@@ -341,11 +341,56 @@ func parseClientConfig() (clientConfig, error) {
 		return clientConfig{}, err
 	}
 	cfg.ServerURLs = normalizeConfiguredServerURLs(cfg.ServerURLs, cfg.ServerURL)
-	if len(cfg.ServerURLs) == 0 {
-		return clientConfig{}, fmt.Errorf("at least one server URL is required (server_url/server_urls)")
+	if err := validateClientConfig(cfg); err != nil {
+		return clientConfig{}, err
 	}
 	cfg.ServerURLs = shuffleServerURLs(cfg.ServerURLs)
 	return cfg, nil
+}
+
+// validateClientConfig rejects misconfigured numeric/timing fields and unsafe
+// server URLs before any of them are used or logged.
+func validateClientConfig(cfg clientConfig) error {
+	if len(cfg.ServerURLs) == 0 {
+		return fmt.Errorf("at least one server URL is required (server_url/server_urls)")
+	}
+	if cfg.BatchSize <= 0 {
+		return fmt.Errorf("batch_size must be greater than zero")
+	}
+	if cfg.BatchTimeout <= 0 {
+		return fmt.Errorf("batch_timeout must be greater than zero")
+	}
+	if cfg.HTTPTimeout <= 0 {
+		return fmt.Errorf("http_timeout must be greater than zero")
+	}
+	if cfg.RetryDelay <= 0 {
+		return fmt.Errorf("retry_delay must be greater than zero")
+	}
+	for _, raw := range cfg.ServerURLs {
+		if err := validateServerURL(raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateServerURL(raw string) error {
+	serverURL, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid server URL %q: %w", raw, err)
+	}
+	if serverURL.Scheme != "https" {
+		return fmt.Errorf("server URL must use https: %q", raw)
+	}
+	if serverURL.Hostname() == "" {
+		return fmt.Errorf("server URL must include host name: %q", raw)
+	}
+	if serverURL.User != nil {
+		// Do not echo the URL: it may contain a password that would otherwise
+		// end up in process logs via the parse-config error path.
+		return fmt.Errorf("server URL must not include userinfo")
+	}
+	return nil
 }
 
 const (
@@ -463,15 +508,8 @@ func buildClientTLSConfig(cfg clientConfig) (*tls.Config, error) {
 		return nil, fmt.Errorf("at least one server URL is required")
 	}
 	for _, raw := range cfg.ServerURLs {
-		serverURL, err := url.Parse(raw)
-		if err != nil {
-			return nil, fmt.Errorf("invalid server URL %q: %w", raw, err)
-		}
-		if serverURL.Scheme != "https" {
-			return nil, fmt.Errorf("server URL must use https: %q", raw)
-		}
-		if serverURL.Hostname() == "" {
-			return nil, fmt.Errorf("server URL must include host name: %q", raw)
+		if err := validateServerURL(raw); err != nil {
+			return nil, err
 		}
 	}
 	tlsCfg, err := client.LoadClientTLSConfig(cfg.TLSCAFile, cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSUseSystemPool)
