@@ -342,7 +342,7 @@ func parseClientConfig() (clientConfig, error) {
 
 const (
 	journalReadRetryDelay         = 100 * time.Millisecond
-	maxJournalReadFailureDuration = 5 * time.Second
+	maxJournalReadFailureDuration = 15 * time.Second
 )
 
 // journalReadFailureBudgetExceeded reports whether non-corruption journal read
