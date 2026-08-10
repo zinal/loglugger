@@ -423,7 +423,7 @@ func mergeServerConfig(cfg *extractConfig, serverCfg serverConfig) {
 }
 
 func openYDBDriver(ctx context.Context, cfg extractConfig) (*ydb.Driver, error) {
-	dsn := fmt.Sprintf("%s/%s", strings.TrimSpace(cfg.YDBEndpoint), strings.TrimSpace(cfg.YDBDatabase))
+	dsn := ydbDSN(cfg.YDBEndpoint, cfg.YDBDatabase)
 	authOpt, err := ydbAuthOption(ydbAuthOptions{
 		Mode:                  cfg.YDBAuthMode,
 		Login:                 cfg.YDBAuthLogin,
@@ -766,6 +766,15 @@ func contains(items []string, target string) bool {
 
 func quoteYDBPath(path string) string {
 	return "`" + strings.ReplaceAll(path, "`", "_") + "`"
+}
+
+// ydbDSN builds a ydb-go-sdk connection string from endpoint and database.
+// Database paths are typically absolute (e.g. "/local"); joining must not
+// introduce a double slash after the endpoint host.
+func ydbDSN(endpoint, database string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	database = strings.TrimSpace(database)
+	return strings.TrimRight(endpoint, "/") + "/" + strings.TrimLeft(database, "/")
 }
 
 func quoteYDBIdentifier(name string) string {
