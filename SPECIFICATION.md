@@ -368,6 +368,7 @@ field_mapping:
 
 - **Resolution order**: When building a row, the server checks `parsed` first for parsed fields; if the record has `message` instead of `parsed`, the mapping for `parsed.*` yields no value (or a configured default).
 - **Missing source**: If a mapped source field is absent, the destination column may be left NULL or filled with a default (configurable per mapping).
+- **Transform / mapping failure**: If a present source value cannot be converted by the configured transform (or another per-record mapping step fails), the server **rejects the whole batch with HTTP 400** and does **not** update `expected_position`. This is a non-retryable client error: endless 5xx retry would poison the send loop and block later logs. The client must fail-stop (see §4.6 / §10); fixing the mapping or the offending record is an operational concern.
 - **Unmapped columns**: Destination columns not in the mapping may be set from server metadata (e.g., `received_at` = now) or left NULL.
 - **Timestamp parsing**:
   - `timestamp64_us` interprets numeric input as Unix microseconds in UTC.
@@ -642,6 +643,7 @@ Each configured attribute is provided as a list. The certificate subject value m
 | Journal corruption (`EBADMSG`) with recovery enabled | Warn about possible data loss; try reopen/reseek recovery; on success resume with `reset: true`; on failure stop | Accept next successful recovery batch with reset; otherwise position stored on server remains unchanged |
 | Persistent journal read I/O errors (non-corruption, e.g. local journald failures) | Retry briefly (~15s) with short delay; if errors persist, flush any buffered batch and stop so a supervisor can restart/alert; do not retry forever while appearing healthy | Position stored on server remains unchanged until a batch is accepted |
 | YDB unavailable | Client retries; server returns 5xx | Fail batch; do not update position |
+| Field mapping / transform failure for a record in the batch | Do not retry; fail-stop so the flushed batch is not skipped; on restart, resume from the server-stored position (still pointing at the rejected batch until mapping or data is fixed) | Reject batch with HTTP 400; do not update position |
 | Non-retryable HTTP 4xx on batch submit (e.g. 400/401/403/404/413/422) | Do not retry; stop the process after logging the error so the already-flushed batch is not skipped; on restart, resume from the server-stored position | Reject batch; do not update position |
 | Single journal record whose JSON exceeds the 15 MiB request limit | Fail-stop with an error; do not send an oversized request and do not skip the record silently | N/A (no request is sent) |
 | Duplicate batch (retry) | Client may retry same batch | Idempotent BulkUpsert; position already updated—reject with 409 if current_position no longer matches |
