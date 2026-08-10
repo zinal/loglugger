@@ -33,7 +33,9 @@ echo "Staging distribution under ${DEST}..."
 cp -a bin/loglugger-client bin/loglugger-server bin/loglugger-extractor "${DEST}/bin/"
 chmod 0755 "${DEST}/bin/loglugger-client" "${DEST}/bin/loglugger-server" "${DEST}/bin/loglugger-extractor"
 
-cp -a README.md README-ru.md LICENSE "${DEST}/"
+# Operator-facing docs. SPECIFICATION.md (internal contract) and AGENTS.md
+# (coding-agent guidance) stay in the repository and must not ship in dist.
+cp -a README.md README-ru.md LICENSE CHANGELOG.md CHANGELOG-ru.md "${DEST}/"
 cp -a examples "${DEST}/"
 
 # Keep Ansible runnable from the unpacked tree: roles default to
@@ -46,6 +48,18 @@ if [ ! -f "${DEST}/examples/ansible/inventory.example.ini" ]; then
 	echo "error: Ansible inventory example missing from staged examples" >&2
 	exit 1
 fi
+for required in CHANGELOG.md CHANGELOG-ru.md LICENSE README.md README-ru.md; do
+	if [ ! -f "${DEST}/${required}" ]; then
+		echo "error: required distribution file missing from stage: ${required}" >&2
+		exit 1
+	fi
+done
+for excluded in AGENTS.md SPECIFICATION.md; do
+	if [ -e "${DEST}/${excluded}" ]; then
+		echo "error: ${excluded} must not be included in the distribution archive" >&2
+		exit 1
+	fi
+done
 
 mkdir -pv "${DIST_DIR}"
 ARCHIVE_PATH="${DIST_DIR}/${ARCHIVE_NAME}"

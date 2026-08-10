@@ -16,7 +16,7 @@ High-level changes on `main` since the `v1.0` tag.
 - Client batch size limits are measured as the exact uncompressed JSON request body (default cap **15 MiB**), instead of an approximate uncompressed log-data budget.
 - Default server compressed request-body limit raised from 8 MiB to **16 MiB**, aligned with the client JSON cap and the existing 32 MiB decompressed limit.
 - Go toolchain upgraded from 1.24.x to **1.26.5**.
-- Distribution packaging excludes `SPECIFICATION.md`; the project is licensed under **Apache License 2.0**.
+- Distribution packaging includes both `CHANGELOG*` files and `LICENSE`; `SPECIFICATION.md` and `AGENTS.md` stay repository-only. The project is licensed under **Apache License 2.0**.
 
 ### Added
 

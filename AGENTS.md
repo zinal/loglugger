@@ -7,6 +7,11 @@ The formal product and protocol contract is
 client/server behavior, position handling, batching, HTTP APIs, or deployment
 semantics, and update it in the same change set when those rules change.
 
+Portable distribution archives built by [`build-ditto.sh`](build-ditto.sh) ship
+operator-facing docs including both changelog files. Keep this file and
+`SPECIFICATION.md` repository-only: they must not be added to the staged dist
+tree.
+
 ## Changelog updates
 
 When a change is **user-visible or otherwise significant** (behavior, API/protocol,
