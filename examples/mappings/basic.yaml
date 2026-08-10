@@ -6,6 +6,7 @@ field_mapping:
     transform: int64
   - source: parsed.P_DTTM
     destination: log_dttm
+    transform: timestamp64
   - source: parsed.P_SERVICE
     destination: service_name
   - source: parsed.P_LEVEL

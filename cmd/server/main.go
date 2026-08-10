@@ -67,11 +67,21 @@ func main() {
 		}()
 	}
 
+	tablePath := fullTablePath(cfg.YDBDatabase, cfg.YDBTable)
+	if validator, ok := writer.(interface {
+		ValidateMappings(context.Context, string, []server.FieldMapping) error
+	}); ok {
+		if err := validator.ValidateMappings(context.Background(), tablePath, mappings); err != nil {
+			slog.Error("validate field mappings against table schema", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	mapper := server.NewMapper(mappings)
 	handler := server.NewHandlerWithOptions(
 		mapper,
 		writer,
-		fullTablePath(cfg.YDBDatabase, cfg.YDBTable),
+		tablePath,
 		server.HandlerOptions{
 			MaxCompressedBodyBytes:   cfg.MaxCompressedBodyBytes,
 			MaxDecompressedBodyBytes: cfg.MaxDecompressedBodyBytes,
