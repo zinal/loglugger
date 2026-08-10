@@ -312,7 +312,11 @@ func (h *Handler) validateAndMapRecords(clientID string, records []models.Record
 		}
 		row, err := h.mapper.MapRecord(clientID, rec)
 		if err != nil {
-			return nil, err
+			// Mapping/transform failures are bad request data (or a misconfigured
+			// mapping applied to that data), not transient storage errors. Prefix
+			// with "invalid" so writeResponse returns 400; the client fail-stops
+			// instead of endlessly retrying a poisonous batch.
+			return nil, fmt.Errorf("invalid records[%d]: %w", i, err)
 		}
 		rows = append(rows, row)
 	}
@@ -350,7 +354,7 @@ func (h *Handler) writeResponse(w http.ResponseWriter, resp *models.BatchRespons
 		if respOut.Message == "client_id is required" || respOut.Message == "next_position is required" ||
 			respOut.Message == "current_position is required when reset is false" ||
 			respOut.Message == "missing current_position or reset required" ||
-			(len(respOut.Message) > 6 && respOut.Message[:6] == "invalid") {
+			strings.HasPrefix(respOut.Message, "invalid") {
 			status = http.StatusBadRequest
 		} else {
 			status = http.StatusInternalServerError
