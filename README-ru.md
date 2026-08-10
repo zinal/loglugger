@@ -8,7 +8,7 @@ English version: [README.md](README.md).
 
 ## Варианты развертывания
 
-- **Автоматизация через Ansible (рекомендуется для окружений с YDB):** `examples/ansible/README.md`
+- **Автоматизация через Ansible (рекомендуется для окружений с YDB):** `examples/ansible/README-ru.md`
 - **Ручная настройка (тонкая кастомизация):** разделы ниже в этом README
 - Для типовой установки YDB сертификаты YDB можно использовать и для Loglugger: `/opt/ydb/certs` (`ca.crt`, `node.crt`, `node.key`), как в Ansible-примере.
 
@@ -37,7 +37,7 @@ sudo apt-get install -y libsystemd-dev  # либо аналог для ваше�
 ```bash
 ./bin/loglugger-server -config examples/config/server.yaml
 ```
-Здесь описан ручной вариант настройки (альтернатива - автоматизация через Ansible, см. `examples/ansible/README.md` роль `server`).
+Здесь описан ручной вариант настройки (альтернатива - автоматизация через Ansible, см. `examples/ansible/README-ru.md` роль `server`).
 
 Конфигурация сервера:
 
@@ -54,7 +54,7 @@ sudo apt-get install -y libsystemd-dev  # либо аналог для ваше�
 ```bash
 ./bin/loglugger-client -config examples/config/client.yaml
 ```
-Здесь описан ручной вариант настройки (альтернатива - автоматизация через Ansible, см. `examples/ansible/README.md` роль `client`).
+Здесь описан ручной вариант настройки (альтернатива - автоматизация через Ansible, см. `examples/ansible/README-ru.md` роль `client`).
 
 Конфигурация клиента:
 
@@ -112,7 +112,7 @@ sudo apt-get install -y libsystemd-dev  # либо аналог для ваше�
 ### Локальная настройка mTLS
 
 Следующие команды `openssl` создают локальный CA, а также серверный и клиентский сертификаты, используемые в примере с mTLS.
-Это ручной, гибко настраиваемый вариант. Для типовых установок YDB обычно достаточно переиспользовать существующие сертификаты YDB из `/opt/ydb/certs` (описано в `examples/ansible/README.md`) без генерации отдельного локального CA.
+Это ручной, гибко настраиваемый вариант. Для типовых установок YDB обычно достаточно переиспользовать существующие сертификаты YDB из `/opt/ydb/certs` (описано в `examples/ansible/README-ru.md`) без генерации отдельного локального CA.
 
 ```bash
 mkdir -p certs
@@ -174,7 +174,7 @@ go test ./...
 
 Сервер поддерживает `writer_backend: ydb` и использует `github.com/ydb-platform/ydb-go-sdk/v3` для `BulkUpsert`. При включении YDB-бэкенда укажите в конфигурационном файле `ydb_endpoint`, `ydb_database` и `ydb_table`. Реализация хранилища позиций выбирается автоматически на основе `writer_backend` (`mock` -> позиции в памяти, `ydb` -> хранение позиций в YDB через `position_table`). `MockWriter` остается доступным для тестов и локальных запусков.
 
-Здесь описан ручной вариант установки и доступные настройки, альтернатива - автоматизация через Ansible, описанная в `examples/ansible/README.md`. Вариант установки через Ansible автоматизирует генерацию конфигов сервера/клиента Loglugger, установку systemd-юнитов, установку совместимого с YDB field mapping по умолчанию и запуск сервисов.
+Здесь описан ручной вариант установки и доступные настройки, альтернатива - автоматизация через Ansible, описанная в `examples/ansible/README-ru.md`. Вариант установки через Ansible автоматизирует генерацию конфигов сервера/клиента Loglugger, установку systemd-юнитов, установку совместимого с YDB field mapping по умолчанию и запуск сервисов.
 
 Поддерживаемые режимы аутентификации YDB:
 

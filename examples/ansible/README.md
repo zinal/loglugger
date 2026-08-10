@@ -1,5 +1,7 @@
 # Minimal Loglugger Ansible Playbook
 
+Russian version: [README-ru.md](README-ru.md).
+
 This example installs Loglugger with two roles:
 
 - `server` installs and starts `loglugger-server`
