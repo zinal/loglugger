@@ -32,8 +32,9 @@ type Batcher interface {
 	Flush() *Batch
 	ShouldFlush() bool
 	// Clear drops all buffered entries without producing a batch. Used when the
-	// journal stream is restarted (position mismatch reseek/reset, recovery) so
-	// leftover records cannot be sent with stale CurrentPosition values.
+	// journal stream is restarted after HTTP 409 position mismatch (reseek/reset)
+	// so leftover records cannot be sent with stale CurrentPosition values.
+	// Not used after journal corruption recovery, which must retain unsent buffers.
 	Clear()
 }
 

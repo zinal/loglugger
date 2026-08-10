@@ -251,11 +251,20 @@ func main() {
 					slog.Error(recoveryErr.Error(), "error", err)
 					os.Exit(1)
 				}
-				// Recovery repositions the journal stream; drop any unsent
-				// buffers that still carry pre-recovery protocol positions.
-				discardUnsentBuffers(batcher, multilineMerger)
-				if recoveredReset {
-					reset = true
+				reset = finishJournalCorruptionRecovery(reset, recoveredReset)
+				// Recovery resumes after the last read cursor. Keep unsent
+				// buffers and flush what is already batched with reset:true;
+				// discarding here would permanently drop records journald will
+				// not re-emit (unlike a §4.3 position-mismatch reseek).
+				if batch := batcher.Flush(); batch != nil {
+					var sendErr error
+					var streamRestarted bool
+					reset, streamRestarted, sendErr = sendBatch(ctx, journal, sender, batch, reset)
+					if sendErr != nil {
+						stopOnSendFailure(sendErr)
+					} else if streamRestarted {
+						discardUnsentBuffers(batcher, multilineMerger)
+					}
 				}
 				continue
 			}
@@ -585,10 +594,23 @@ func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bo
 	return resp.CurrentPosition, false, nil
 }
 
-// discardUnsentBuffers drops leftover batcher/multiline state after the journal
-// read stream is restarted. Partial JSON/count flushes can leave records whose
-// CurrentPosition still reflects the pre-mismatch stream; sending them next
-// would repeat 409s or attach stale records to a reset batch.
+// finishJournalCorruptionRecovery updates protocol state after journal.Recover
+// succeeds. Unsent batcher/multiline buffers must be retained by the caller:
+// recovery resumes after the last successfully read cursor, so clearing those
+// buffers would drop records that journald will not re-emit.
+func finishJournalCorruptionRecovery(reset bool, recoveredReset bool) bool {
+	if recoveredReset {
+		return true
+	}
+	return reset
+}
+
+// discardUnsentBuffers drops leftover batcher/multiline state after a
+// position-mismatch stream restart (HTTP 409 reseek/reset to expected_position
+// or head). Partial JSON/count flushes can leave records whose CurrentPosition
+// still reflects the pre-mismatch stream; sending them next would repeat 409s
+// or attach stale records to a reset batch. Do not use after journal corruption
+// recovery — that path must retain unsent buffers (see finishJournalCorruptionRecovery).
 func discardUnsentBuffers(batcher client.Batcher, multiline *client.MultilineMerger) {
 	if batcher != nil {
 		batcher.Clear()

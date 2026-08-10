@@ -325,6 +325,40 @@ func TestDiscardUnsentBuffersClearsBatcherRemainderAndMultiline(t *testing.T) {
 	}
 }
 
+func TestFinishJournalCorruptionRecoveryRetainsUnsentBuffers(t *testing.T) {
+	// Corruption recovery must not call discardUnsentBuffers: Recover resumes
+	// after journalReader.last, so buffered records would never be re-read.
+	batcher := client.NewBatcher(10, 0, "c")
+	if err := batcher.Add(&client.JournalEntry{
+		Record: models.Record{Message: "buffered"}, Position: "p0", Cursor: "c10",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	merger, err := client.NewMultilineMerger(`^START`, time.Second, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := merger.Add(&client.JournalEntry{
+		Record: models.Record{Message: "START pending"}, Cursor: "c-pending",
+	}, time.Unix(1, 0)); len(out) != 0 {
+		t.Fatalf("unexpected multiline output: %+v", out)
+	}
+
+	reset := finishJournalCorruptionRecovery(false, true)
+	if !reset {
+		t.Fatal("recovery must force reset=true for the next send")
+	}
+	// finishJournalCorruptionRecovery only updates reset; callers must not
+	// discardUnsentBuffers. The buffered record and multiline pending remain.
+	batch := batcher.Flush()
+	if batch == nil || len(batch.Records) != 1 || batch.NextPosition != "c10" {
+		t.Fatalf("retained flush = %+v, want buffered record through c10", batch)
+	}
+	if drained := merger.Drain(); drained == nil || drained.Cursor != "c-pending" {
+		t.Fatalf("multiline pending must be retained after recovery: %+v", drained)
+	}
+}
+
 func TestNewShutdownFlushContextHasDeadline(t *testing.T) {
 	if shutdownFlushTimeout != 10*time.Second {
 		t.Fatalf("shutdownFlushTimeout = %v, want 10s", shutdownFlushTimeout)

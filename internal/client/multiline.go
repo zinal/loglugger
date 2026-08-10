@@ -86,9 +86,10 @@ func (m *MultilineMerger) Drain() *JournalEntry {
 	return out
 }
 
-// Discard drops any unfinished multiline entry without emitting it. Used when
-// the journal stream is restarted so a partial merge cannot be sent with a
-// stale protocol position.
+// Discard drops any unfinished multiline entry without emitting it. Used after
+// an HTTP 409 position-mismatch stream restart so a partial merge cannot be
+// sent with a stale protocol position. Not used after journal corruption
+// recovery, which must retain unfinished multiline state.
 func (m *MultilineMerger) Discard() {
 	if m == nil {
 		return
