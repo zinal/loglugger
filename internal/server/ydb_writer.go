@@ -125,6 +125,10 @@ LIMIT 1;
 
 func (w *YDBWriter) SetPosition(ctx context.Context, clientID, expectedPosition, nextPosition string, update PositionUpdate) error {
 	err := w.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		// COALESCE keeps previously stored seqno/ts_orig when the batch did not
+		// carry those fields (empty batch / heartbeat / optional fields omitted).
+		// UPSERT updates every listed column, so binding SQL NULL would wipe them.
+		// One AsTuple read covers exp_pos + seqno + ts_orig.
 		_, err := tx.Execute(
 			ctx,
 			fmt.Sprintf(`
@@ -135,8 +139,8 @@ DECLARE $ts_wall_us AS Timestamp64;
 DECLARE $ts_orig AS Timestamp64?;
 DECLARE $seqno AS Int64?;
 
-$current_pos = (
-    SELECT exp_pos
+$current = (
+    SELECT AsTuple(exp_pos, seqno, ts_orig)
     FROM %s
     WHERE client_id = $client_id
     LIMIT 1
@@ -144,9 +148,9 @@ $current_pos = (
 
 UPSERT INTO %s (client_id, exp_pos, ts_wall, seqno, ts_orig)
 VALUES ($client_id, Ensure($new_exp_pos,
-			COALESCE($current_pos, ""u) == $old_exp_pos,
+			COALESCE($current.0, ""u) == $old_exp_pos,
 			"position mismatch"),
-	$ts_wall_us, $seqno, $ts_orig);
+	$ts_wall_us, COALESCE($seqno, $current.1), COALESCE($ts_orig, $current.2));
 `, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
@@ -176,6 +180,7 @@ VALUES ($client_id, Ensure($new_exp_pos,
 
 func (w *YDBWriter) SetPositionUnconditional(ctx context.Context, clientID, nextPosition string, update PositionUpdate) error {
 	err := w.driver.Table().DoTx(ctx, func(ctx context.Context, tx table.TransactionActor) error {
+		// Same preserve-on-NULL semantics as SetPosition (see comment there).
 		_, err := tx.Execute(
 			ctx,
 			fmt.Sprintf(`
@@ -185,9 +190,16 @@ DECLARE $ts_wall_us AS Timestamp64;
 DECLARE $ts_orig AS Timestamp64?;
 DECLARE $seqno AS Int64?;
 
+$current = (
+    SELECT AsTuple(seqno, ts_orig)
+    FROM %s
+    WHERE client_id = $client_id
+    LIMIT 1
+);
+
 UPSERT INTO %s (client_id, exp_pos, ts_wall, seqno, ts_orig)
-VALUES ($client_id, $exp_pos, $ts_wall_us, $seqno, $ts_orig);
-`, quoteYDBPath(w.positionTable)),
+VALUES ($client_id, $exp_pos, $ts_wall_us, COALESCE($seqno, $current.0), COALESCE($ts_orig, $current.1));
+`, quoteYDBPath(w.positionTable), quoteYDBPath(w.positionTable)),
 			ydb.ParamsBuilder().
 				Param("$client_id").Text(clientID).
 				Param("$exp_pos").Text(nextPosition).
