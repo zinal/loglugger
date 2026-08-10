@@ -25,6 +25,8 @@ By default, both roles use YDB certificates from `/opt/ydb/certs`.
 ./build.sh
 ```
 
+If target hosts are older than the build machine (for example Ubuntu 20.04 with glibc 2.31) and `loglugger-client` fails with `GLIBC_2.32' not found`, rebuild with `./build-docker.sh` (or `LOGLUGGER_PORTABLE=1 ./build.sh`) before running the playbook.
+
 2. Ensure target hosts already have certificates in `/opt/ydb/certs`:
 
 - `/opt/ydb/certs/ca.crt`
