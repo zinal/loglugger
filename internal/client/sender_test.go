@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -657,3 +658,122 @@ func TestErrClientErrorMessage(t *testing.T) {
 		t.Fatalf("Error() = %q, want %q", got, "client error: bad request")
 	}
 }
+
+func TestReadHTTPResponseBodyLimitsSize(t *testing.T) {
+	t.Parallel()
+
+	body := io.NopCloser(strings.NewReader(strings.Repeat("a", int(maxResponseBodyBytes)+1)))
+	got, err := readHTTPResponseBody(body)
+	if err == nil {
+		t.Fatalf("expected error for oversized body, got %d bytes", len(got))
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("error = %v, want exceeds limit", err)
+	}
+}
+
+func TestReadHTTPResponseBodyReturnsReadError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("boom")
+	got, err := readHTTPResponseBody(io.NopCloser(errReader{err: wantErr}))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if got != nil {
+		t.Fatalf("got = %q, want nil", got)
+	}
+}
+
+func TestReadHTTPResponseBodyReturnsCloseError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("close failed")
+	_, err := readHTTPResponseBody(&closeErrReader{
+		Reader: strings.NewReader(`{"status":"ok"}`),
+		err:    wantErr,
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestSenderCurrentPositionRetriesOnOversizedResponse(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(strings.Repeat("x", int(maxResponseBodyBytes)+1)))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","current_position":"cursor-ok"}`))
+	}))
+	defer srv.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{srv.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+
+	resp, err := s.CurrentPosition(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentPosition() error = %v", err)
+	}
+	if resp == nil || resp.CurrentPosition != "cursor-ok" {
+		t.Fatalf("CurrentPosition() = %+v, want cursor-ok", resp)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
+func TestSenderSendRetriesOnOversizedResponse(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(strings.Repeat("x", int(maxResponseBodyBytes)+1)))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","next_position":"p2"}`))
+	}))
+	defer srv.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{srv.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+
+	resp, err := s.Send(context.Background(), &models.BatchRequest{
+		NextPosition: "p2",
+		Records:      []models.Record{{Message: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if resp == nil || resp.Status != "ok" || resp.NextPosition != "p2" {
+		t.Fatalf("Send() = %+v, want ok/p2", resp)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }
+
+type closeErrReader struct {
+	io.Reader
+	err error
+}
+
+func (r *closeErrReader) Close() error { return r.err }

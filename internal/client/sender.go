@@ -43,6 +43,10 @@ const (
 	minShuffleInterval = 30 * time.Minute
 	maxShuffleInterval = 60 * time.Minute
 )
+// maxResponseBodyBytes caps HTTP response bodies from the server. Batch and
+// position responses are small JSON; an unbounded ReadAll would let a
+// misconfigured or malicious endpoint exhaust client memory.
+const maxResponseBodyBytes int64 = 1 << 20 // 1 MiB
 
 type senderEndpoint struct {
 	client      *http.Client
@@ -158,8 +162,13 @@ func (s *sender) sendCompressedJSON(ctx context.Context, body []byte) (*models.B
 			continue
 		}
 
-		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		respBody, err := readHTTPResponseBody(resp.Body)
+		if err != nil {
+			slog.Debug("read batch response failed", "attempt", attempt+1, "endpoint", endpoint.baseURL, "error", err)
+			s.logCompletedRetryCycle("send batch", attempt+1)
+			s.advanceStartIndexOnFailure(endpointIdx)
+			continue
+		}
 
 		var batchResp models.BatchResponse
 		if err := json.Unmarshal(respBody, &batchResp); err != nil {
@@ -225,6 +234,26 @@ func compressJSON(body []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// readHTTPResponseBody reads at most maxResponseBodyBytes from body and closes it.
+// A body larger than the limit is rejected so a hostile server cannot OOM the client.
+func readHTTPResponseBody(body io.ReadCloser) (data []byte, err error) {
+	defer func() {
+		closeErr := body.Close()
+		if err == nil && closeErr != nil {
+			err = fmt.Errorf("close response body: %w", closeErr)
+		}
+	}()
+	limited := io.LimitReader(body, maxResponseBodyBytes+1)
+	data, err = io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if int64(len(data)) > maxResponseBodyBytes {
+		return nil, fmt.Errorf("response body exceeds %d bytes", maxResponseBodyBytes)
+	}
+	return data, nil
+}
+
 func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse, error) {
 	if len(s.endpoints) == 0 {
 		return nil, fmt.Errorf("no server endpoints configured")
@@ -248,8 +277,12 @@ func (s *sender) CurrentPosition(ctx context.Context) (*models.PositionResponse,
 			continue
 		}
 
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		body, err := readHTTPResponseBody(resp.Body)
+		if err != nil {
+			slog.Debug("read position response failed", "attempt", attempt+1, "endpoint", endpoint.baseURL, "error", err)
+			s.advanceStartIndexOnFailure(endpointIdx)
+			continue
+		}
 
 		var positionResp models.PositionResponse
 		if err := json.Unmarshal(body, &positionResp); err != nil {
