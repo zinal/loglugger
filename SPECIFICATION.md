@@ -101,7 +101,8 @@ All timestamps transferred or persisted by Loglugger as typed timestamp values a
   - If that still fails, try to seek to a point just after the timestamp of the last known good entry.
 - **Recovery warning**: When recovery is enabled and corruption is detected, the client must log a warning that some data loss is possible.
 - **Recovery result**:
-  - If recovery succeeds, the client resumes reading and must send the next batch with `reset: true`, because continuity relative to the previous server-side position may have been broken. It must also discard any unsent in-memory batch buffer and unfinished multiline state, for the same reason as a position-mismatch stream restart (§4.3).
+  - If recovery succeeds, the client resumes reading and must send the next batch with `reset: true`, because continuity relative to the previous server-side position may have been broken.
+  - The client **must retain** any unsent in-memory batch buffer and unfinished multiline state across successful recovery, and must ship that retained data (with `reset: true` on the next send). Recovery resumes after the last successfully read journal cursor (`last`), so discarded buffers would never be re-read from journald and would violate at-least-once delivery. This differs from a §4.3 position-mismatch stream restart, where the journal is repositioned to a server `expected_position` (or head) and leftover pre-mismatch buffers must be discarded because they carry stale protocol positions.
   - If recovery still fails, the client must stop and report that recovery is not possible.
 
 ### 4.3.2 Persistent Journal Read Failures
@@ -651,7 +652,7 @@ Each configured attribute is provided as a list. The certificate subject value m
 | Server restart | On startup, fetch current position from `GET /v1/positions`; then continue or reset | Position stored on server persists |
 | Journal rotation / vacuumed cursor | If `sd_journal_seek_cursor` + `sd_journal_test_cursor` cannot confirm the server-provided cursor, treat it as invalid: send reset and restart from head (do not resume from the nearest neighbor) | Accept with reset; update expected position |
 | Journal corruption (`EBADMSG`) with recovery disabled | Log corruption, mention recovery option, and stop | Position stored on server remains unchanged |
-| Journal corruption (`EBADMSG`) with recovery enabled | Warn about possible data loss; try reopen/reseek recovery; on success resume with `reset: true`; on failure stop | Accept next successful recovery batch with reset; otherwise position stored on server remains unchanged |
+| Journal corruption (`EBADMSG`) with recovery enabled | Warn about possible data loss; try reopen/reseek recovery; on success retain any already-buffered unsent records/multiline state, resume with `reset: true`, and send that retained data before relying on post-recovery reads; on failure stop | Accept next successful recovery batch with reset; otherwise position stored on server remains unchanged |
 | Persistent journal read I/O errors (non-corruption, e.g. local journald failures) | Retry briefly (~15s) with short delay; if errors persist, flush any buffered batch and stop so a supervisor can restart/alert; do not retry forever while appearing healthy | Position stored on server remains unchanged until a batch is accepted |
 | YDB unavailable | Client retries; server returns 5xx | Fail batch; do not update position |
 | Field mapping / transform failure for a record in the batch | Do not retry; fail-stop so the flushed batch is not skipped; on restart, resume from the server-stored position (still pointing at the rejected batch until mapping or data is fixed) | Reject batch with HTTP 400; do not update position |

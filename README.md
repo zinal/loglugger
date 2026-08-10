@@ -105,7 +105,7 @@ Client configuration:
 - If a single record cannot fit under that limit together with the request envelope, the client stops with an error (the record is not silently dropped and is not sent above the limit).
 - Every outgoing record includes `seqno`: a monotonically increasing client-side sequence number. The first value equals client startup time in milliseconds since Unix epoch.
 
-When recovery is enabled and corruption is detected, the client warns that data loss is possible, tries to reopen the journal and resume from the last good position, and falls back to seeking past the last good timestamp. If recovery succeeds, the next batch is sent with a reset so the server accepts the new position. If recovery still fails, the client stops.
+When recovery is enabled and corruption is detected, the client warns that data loss is possible, tries to reopen the journal and resume from the last good position, and falls back to seeking past the last good timestamp. If recovery succeeds, any already-buffered unsent records and unfinished multiline state are kept and sent with `reset: true` (recovery resumes after the last read cursor, so discarding that buffer would lose data); then reading continues. If recovery still fails, the client stops.
 
 **Extractor** (reads YDB and writes TSV):
 ```bash
