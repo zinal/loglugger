@@ -117,7 +117,7 @@ Extractor configuration and behavior:
 - `-from` and `-to` are mandatory and define `[from,to)` with inclusive lower bound and exclusive upper bound (RFC3339/RFC3339Nano).
 - `-time-column` selects event-time column for interval filter (default `ts_orig`).
 - `-filter field=v1,v2` adds optional field-list filters (`IN` clauses). Repeat `-filter` to add more fields.
-- Output format is TSV; text values are normalized so TAB/newline characters do not break TSV rows.
+- Output format is TSV; text values escape TAB/CR/LF as `\t`, `\n`, and `\r` so they do not break TSV rows.
 - Rotation is size-based:
   - default plain output limit: `200MiB`
   - default zstd output limit (`-zstd`): `10MiB`

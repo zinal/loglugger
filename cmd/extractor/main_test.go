@@ -132,11 +132,11 @@ func TestStringifyCellAndNormalizeTSVText(t *testing.T) {
 		}
 	}
 
-	if got := normalizeTSVText("plain"); got != "plain" {
-		t.Fatalf("plain normalize = %q", got)
+	if got := escapeTSVText("plain"); got != "plain" {
+		t.Fatalf("plain escape = %q", got)
 	}
-	if got := normalizeTSVText("a\tb\nc\rd"); got != "a\\tb\\nc\\rd" {
-		t.Fatalf("escape normalize = %q", got)
+	if got := escapeTSVText("a\tb\nc\rd"); got != "a\\tb\\nc\\rd" {
+		t.Fatalf("control-char escape = %q", got)
 	}
 }
 
