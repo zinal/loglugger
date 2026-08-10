@@ -275,6 +275,11 @@ func structFieldsForRow(row map[string]interface{}, columns []options.Column) ([
 		if err != nil {
 			return nil, fmt.Errorf("encode %s: %w", column.Name, err)
 		}
+		// Nullable YDB columns are Optional(T). Present values must be wrapped
+		// with OptionalValue; bare primitives mismatch the column type.
+		if optional, _ := types.IsOptional(column.Type); optional {
+			value = types.OptionalValue(value)
+		}
 		structFields = append(structFields, types.StructFieldValue(column.Name, value))
 	}
 	return structFields, nil
