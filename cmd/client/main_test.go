@@ -309,6 +309,106 @@ func TestBuildClientTLSConfigRejectsMissingHost(t *testing.T) {
 	}
 }
 
+func TestBuildClientTLSConfigRejectsUserinfo(t *testing.T) {
+	_, err := buildClientTLSConfig(clientConfig{
+		ServerURLs:       []string{"https://user:pass@localhost:27312"},
+		TLSUseSystemPool: true,
+	})
+	if err == nil {
+		t.Fatal("expected error for server URL with userinfo")
+	}
+	if !strings.Contains(err.Error(), "userinfo") {
+		t.Fatalf("error = %v, want userinfo mention", err)
+	}
+	if strings.Contains(err.Error(), "pass") {
+		t.Fatalf("error = %v, must not echo password from URL", err)
+	}
+}
+
+func TestValidateClientConfigRejectsInvalidTimingAndBatchFields(t *testing.T) {
+	valid := defaultClientConfig()
+	valid.ServerURLs = []string{"https://localhost:27312"}
+
+	tests := []struct {
+		name    string
+		mutate  func(*clientConfig)
+		wantErr string
+	}{
+		{
+			name: "zero batch_size",
+			mutate: func(cfg *clientConfig) {
+				cfg.BatchSize = 0
+			},
+			wantErr: "batch_size must be greater than zero",
+		},
+		{
+			name: "negative batch_timeout",
+			mutate: func(cfg *clientConfig) {
+				cfg.BatchTimeout = -time.Second
+			},
+			wantErr: "batch_timeout must be greater than zero",
+		},
+		{
+			name: "zero http_timeout",
+			mutate: func(cfg *clientConfig) {
+				cfg.HTTPTimeout = 0
+			},
+			wantErr: "http_timeout must be greater than zero",
+		},
+		{
+			name: "negative retry_delay",
+			mutate: func(cfg *clientConfig) {
+				cfg.RetryDelay = -time.Millisecond
+			},
+			wantErr: "retry_delay must be greater than zero",
+		},
+		{
+			name: "url with userinfo",
+			mutate: func(cfg *clientConfig) {
+				cfg.ServerURLs = []string{"https://user:secret@localhost:27312"}
+			},
+			wantErr: "userinfo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := valid
+			tt.mutate(&cfg)
+			err := validateClientConfig(cfg)
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseClientConfigRejectsNonPositiveBatchTimeout(t *testing.T) {
+	prev := flag.CommandLine
+	prevArgs := os.Args
+	defer func() {
+		flag.CommandLine = prev
+		os.Args = prevArgs
+	}()
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+
+	configPath := writeTempClientConfig(t, `
+server_url: https://localhost:27312
+batch_timeout: -1s
+`)
+	os.Args = []string{"client", "-config", configPath}
+	_, err := parseClientConfig()
+	if err == nil {
+		t.Fatal("expected error for negative batch_timeout")
+	}
+	if !strings.Contains(err.Error(), "batch_timeout must be greater than zero") {
+		t.Fatalf("error = %v, want batch_timeout validation", err)
+	}
+}
+
 func TestParseServerURLs(t *testing.T) {
 	got := parseServerURLs(" https://a:27312,https://b:27312 , , https://c:27312 ")
 	want := []string{"https://a:27312", "https://b:27312", "https://c:27312"}
