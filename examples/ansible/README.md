@@ -130,7 +130,8 @@ Client server URL behavior:
 YDBD parsing defaults in the client role:
 
 - `message_regex` extracts `P_SERVICE`, `P_LEVEL`, and `P_MESSAGE` from YDBD log lines
-- `systemd_unit_regex` extracts `P_DBNAME` from units like `ydbd-database-a.service` and `ydbd-storage-a.service`
+- `systemd_unit_regex` extracts `P_DBNAME` from database units like `ydbd-database-a.service`
+- storage units such as `ydbd-storage.service` do not match this regex, so `dbname` stays at the mapping default `-` (storage nodes have no database name)
 - these defaults prevent empty `msg` and fallback values like `unknown`/`-` in mapped YDB columns
 
 ## Certificate defaults
