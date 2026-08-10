@@ -8,35 +8,74 @@
       loglugger_server_ydb_auth_mode=static requires both
       loglugger_server_ydb_auth_login and loglugger_server_ydb_auth_password.
   when: loglugger_server_ydb_auth_mode == "static"
+  no_log: true
 
-- name: Create Loglugger directories
+- name: Create Loglugger system group
+  ansible.builtin.group:
+    name: "{{ loglugger_server_group }}"
+    system: true
+
+- name: Create Loglugger system user
+  ansible.builtin.user:
+    name: "{{ loglugger_server_user }}"
+    group: "{{ loglugger_server_group }}"
+    groups: >-
+      {{
+        loglugger_server_additional_groups
+        if (loglugger_server_additional_groups | length > 0)
+        else omit
+      }}
+    append: true
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Create Loglugger installation directories
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ item.path }}"
     state: directory
-    mode: "0755"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
   loop:
-    - "{{ loglugger_prefix }}"
-    - "{{ loglugger_prefix }}/bin"
-    - "{{ loglugger_prefix }}/config"
+    - path: "{{ loglugger_prefix }}"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ loglugger_prefix }}/bin"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ loglugger_prefix }}/config"
+      owner: "{{ loglugger_server_user }}"
+      group: "{{ loglugger_server_group }}"
+      mode: "0750"
 
 - name: Install loglugger-server binary
   ansible.builtin.copy:
     src: "{{ loglugger_local_bin_dir }}/loglugger-server"
     dest: "{{ loglugger_prefix }}/bin/loglugger-server"
+    owner: root
+    group: root
     mode: "0755"
 
 - name: Install server config
   ansible.builtin.template:
     src: loglugger-server.yaml.j2
     dest: "{{ loglugger_prefix }}/config/loglugger-server.yaml"
-    mode: "0644"
+    owner: "{{ loglugger_server_user }}"
+    group: "{{ loglugger_server_group }}"
+    mode: "0600"
   notify: Restart loglugger-server
+  no_log: true
 
 - name: Install field mapping config
   ansible.builtin.template:
     src: field_mapping.yaml.j2
     dest: "{{ loglugger_server_field_mapping_file }}"
-    mode: "0644"
+    owner: "{{ loglugger_server_user }}"
+    group: "{{ loglugger_server_group }}"
+    mode: "0640"
   notify: Restart loglugger-server
 
 - name: Install systemd unit
