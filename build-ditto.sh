@@ -33,7 +33,7 @@ echo "Staging distribution under ${DEST}..."
 cp -a bin/loglugger-client bin/loglugger-server bin/loglugger-extractor "${DEST}/bin/"
 chmod 0755 "${DEST}/bin/loglugger-client" "${DEST}/bin/loglugger-server" "${DEST}/bin/loglugger-extractor"
 
-cp -a README.md README-ru.md SPECIFICATION.md "${DEST}/"
+cp -a README.md README-ru.md LICENSE "${DEST}/"
 cp -a examples "${DEST}/"
 
 # Keep Ansible runnable from the unpacked tree: roles default to

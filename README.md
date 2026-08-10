@@ -251,3 +251,7 @@ Notes on YDB schema and mapping:
 - Timezone-less values passed through `transform: timestamp64` are interpreted as UTC.
 - `message_regex`, `systemd_unit_regex`, and `message_regex_no_match` are configured on the client in YAML/JSON configuration.
 - Named groups from both regexes are merged into the same `parsed.*` namespace and can be used by field mapping.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).

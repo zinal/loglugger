@@ -252,3 +252,7 @@ CREATE TABLE `loglugger_positions` (
 - Значения без таймзоны при `transform: timestamp64` интерпретируются как UTC.
 - Параметры `message_regex`, `systemd_unit_regex` и `message_regex_no_match` задаются на клиенте, в YAML/JSON-конфигурации.
 - Именованные группы из обоих regex объединяются в одном пространстве `parsed.*` и доступны при настройке записи полей в базу данных.
+
+## Лицензия
+
+Распространяется на условиях [Apache License, Version 2.0](LICENSE).
