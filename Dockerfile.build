@@ -1,0 +1,28 @@
+# Portable build image targeting glibc 2.31 (Ubuntu 20.04 / Debian bullseye).
+# Used by ./build-docker.sh so loglugger-client runs on older YDB hosts.
+FROM ubuntu:20.04
+
+ARG GO_VERSION=1.24.5
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends \
+		ca-certificates \
+		curl \
+		gcc \
+		git \
+		libsystemd-dev \
+		pkg-config \
+	&& rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz \
+	&& rm -rf /usr/local/go \
+	&& tar -C /usr/local -xzf /tmp/go.tgz \
+	&& rm /tmp/go.tgz
+
+ENV PATH="/usr/local/go/bin:${PATH}" \
+	CGO_ENABLED=1 \
+	GOTOOLCHAIN=local
+
+WORKDIR /src
+CMD ["./build.sh"]

@@ -25,6 +25,24 @@ sudo apt-get install -y libsystemd-dev  # or your operating system equivalent
 ./build.sh
 ```
 
+`loglugger-server` and `loglugger-extractor` are built with `CGO_ENABLED=0` and are portable across Linux glibc versions. `loglugger-client` needs CGO (journald / `libsystemd`) and therefore inherits the glibc version of the build host.
+
+If the client fails on the target host with an error like:
+
+```text
+/opt/ydb/loglugger/bin/loglugger-client: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.32' not found
+```
+
+rebuild with a portable client binary (Ubuntu 20.04 / glibc 2.31 baseline):
+
+```bash
+./build-docker.sh
+# or, with zig installed:
+# LOGLUGGER_PORTABLE=1 ./build.sh
+```
+
+Then redeploy the binaries from `./bin`.
+
 This repository vendors a fork of `github.com/coreos/go-systemd/v22` under `third_party/go-systemd` and uses it via a local `replace` in `go.mod`. The fork adds native journald namespace support (`sd_journal_open_namespace`), which is required for reliable reading from non-default namespaces.
 
 The client requires Linux for journald support. On macOS and Windows, the client fails at startup with "journald is only supported on Linux".
