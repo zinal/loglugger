@@ -128,6 +128,8 @@ Extractor configuration and behavior:
   - default zstd output limit (`-zstd`): `10MiB`
   - override with `-max-file-size`
 - Files are named `<output-prefix>_<NNNNNN>.tsv` (or `.tsv.zst` with `-zstd`).
+- Before each extraction attempt the tool deletes existing files matching that naming pattern for `-output-prefix` in `-output-dir`, then creates outputs with `O_EXCL`. This prevents duplicate rows after retries and allows re-running with the same parameters after a failure (other files in the directory are left untouched).
+- Transient YDB failures during the scan are retried by the extractor itself (with logging and prefix cleanup). SDK auto-retry is disabled around the file-writing callback because that callback is not idempotent.
 
 ### Example Mapping Files
 

@@ -433,6 +433,9 @@ Loglugger must include a dedicated extraction tool that reads records from the t
 - **Default size limits**:
   - Uncompressed output: `200 MiB`
   - Compressed output (zstd enabled): `10 MiB`
+- **Output naming**: Files are named `<output-prefix>_<NNNNNN>.tsv` (or `.tsv.zst` when compression is enabled).
+- **Prefix cleanup before write**: Before each extraction attempt the tool deletes existing files in the output directory that match that naming pattern for the configured `output-prefix`. This makes a full attempt restart-safe (no duplicate rows after a retry) and allows re-invoking the tool with the same parameters after a failed run. Other files in the directory are left untouched. Individual output files are still created with `O_EXCL` so concurrent writers cannot clobber the same path.
+- **Retries**: Automatic YDB SDK retries are disabled around the file-writing scan callback (the callback is not idempotent). The tool instead performs an explicit outer retry loop for transient YDB failures: log the failure, delete matching prefix files again, and restart the scan from the beginning. Non-retryable errors and exhausted attempts fail the process.
 
 #### 5.8.4 Database connection specification
 
