@@ -152,8 +152,6 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 		case http.StatusConflict:
 			s.markSuccess(endpointIdx)
 			return &batchResp, nil
-		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
-			return &batchResp, ErrClientError{Message: batchResp.Message}
 		default:
 			if resp.StatusCode >= 500 {
 				slog.Debug("send got retriable HTTP status", "attempt", attempt+1, "endpoint", endpoint.baseURL, "status_code", resp.StatusCode, "message", batchResp.Message)
@@ -161,7 +159,12 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 				s.advanceStartIndexOnFailure(endpointIdx)
 				continue
 			}
-			return &batchResp, fmt.Errorf("HTTP %d: %s", resp.StatusCode, batchResp.Message)
+			// Non-retryable HTTP errors (4xx except 409 above). Caller must fail-stop.
+			msg := batchResp.Message
+			if msg == "" {
+				msg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+			}
+			return &batchResp, ErrClientError{Message: msg}
 		}
 	}
 }

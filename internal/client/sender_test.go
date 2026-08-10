@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -375,6 +376,77 @@ func TestSenderSendTriesNextEndpointOnEachRetryAttempt(t *testing.T) {
 		if hitOrder[i] != wantOrder[i] {
 			t.Fatalf("hit order = %v, want %v", hitOrder, wantOrder)
 		}
+	}
+}
+
+func TestSenderSendDoesNotRetryOn4xx(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		statusCode int
+		body       string
+		wantMsg    string
+	}{
+		{
+			name:       "bad request",
+			statusCode: http.StatusBadRequest,
+			body:       `{"status":"error","message":"invalid records[0]"}`,
+			wantMsg:    "invalid records[0]",
+		},
+		{
+			name:       "not found",
+			statusCode: http.StatusNotFound,
+			body:       `{"status":"error","message":"no route"}`,
+			wantMsg:    "no route",
+		},
+		{
+			name:       "unprocessable",
+			statusCode: http.StatusUnprocessableEntity,
+			body:       `{"status":"error","message":"schema mismatch"}`,
+			wantMsg:    "schema mismatch",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			hits := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits++
+				w.WriteHeader(tc.statusCode)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			s := NewSender(SenderConfig{
+				ServerURLs:  []string{server.URL},
+				ClientID:    "client-1",
+				HTTPTimeout: 2 * time.Second,
+				RetryDelay:  time.Millisecond,
+			})
+
+			_, err := s.Send(context.Background(), &models.BatchRequest{
+				CurrentPosition: "cursor-1",
+				NextPosition:    "cursor-2",
+				Records:         []models.Record{{Message: "hello"}},
+			})
+			if err == nil {
+				t.Fatal("Send() error = nil, want ErrClientError")
+			}
+			var clientErr ErrClientError
+			if !errors.As(err, &clientErr) {
+				t.Fatalf("Send() error = %v, want ErrClientError", err)
+			}
+			if clientErr.Message != tc.wantMsg {
+				t.Fatalf("ErrClientError.Message = %q, want %q", clientErr.Message, tc.wantMsg)
+			}
+			if hits != 1 {
+				t.Fatalf("hits = %d, want 1 (no retry on 4xx)", hits)
+			}
+		})
 	}
 }
 
