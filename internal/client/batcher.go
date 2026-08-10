@@ -31,6 +31,7 @@ type batcher struct {
 	entrySizes   []int
 	dataBytes    int
 	journalCount int
+	startedAt    time.Time
 }
 
 // NewBatcher creates a batcher.
@@ -45,6 +46,9 @@ func NewBatcher(maxSize int, timeout time.Duration) Batcher {
 }
 
 func (b *batcher) Add(entry *JournalEntry) {
+	if len(b.entries) == 0 {
+		b.startedAt = time.Now()
+	}
 	size := recordLogDataSize(entry.Record)
 	b.entries = append(b.entries, entry)
 	b.entrySizes = append(b.entrySizes, size)
@@ -102,9 +106,12 @@ func (b *batcher) Flush() *Batch {
 		b.entrySizes = b.entrySizes[:0]
 		b.dataBytes = 0
 		b.journalCount = 0
+		b.startedAt = time.Time{}
 	} else {
 		b.entries = b.entries[fitCount:]
 		b.entrySizes = b.entrySizes[fitCount:]
+		// Remaining entries start a new batch timeout window.
+		b.startedAt = time.Now()
 	}
 
 	return batch
@@ -117,7 +124,15 @@ func (b *batcher) ShouldFlush() bool {
 	if b.maxSize > 0 && len(b.entries) >= b.maxSize {
 		return true
 	}
-	return b.dataBytes >= b.maxDataBytes
+	if b.dataBytes >= b.maxDataBytes {
+		return true
+	}
+	// Honor batch_timeout even under a continuous journal stream, where a
+	// select/default loop may never observe the flush ticker.
+	if b.timeout > 0 && !b.startedAt.IsZero() && time.Since(b.startedAt) >= b.timeout {
+		return true
+	}
+	return false
 }
 
 func recordLogDataSize(record models.Record) int {
