@@ -2,7 +2,7 @@
 # Used by ./build-docker.sh so loglugger-client runs on older YDB hosts.
 FROM ubuntu:20.04
 
-ARG GO_VERSION=1.24.5
+ARG GO_VERSION=1.26.5
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \

@@ -17,7 +17,7 @@ else
 fi
 
 IMAGE_TAG="${LOGLUGGER_BUILD_IMAGE:-loglugger-build:glibc231}"
-GO_VERSION="${LOGLUGGER_GO_VERSION:-1.24.5}"
+GO_VERSION="${LOGLUGGER_GO_VERSION:-1.26.5}"
 
 "${ENGINE}" build \
 	--build-arg "GO_VERSION=${GO_VERSION}" \
