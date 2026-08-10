@@ -21,7 +21,8 @@ import (
 type journalReader struct {
 	j              *sdjournal.Journal
 	cfg            JournalConfig
-	last           string
+	last           string // last read journal cursor (recovery / resume)
+	acked          string // last acknowledged protocol position (batch continuity)
 	lastRealtime   uint64
 	exactMatch     string
 	pending        []*JournalEntry
@@ -75,6 +76,7 @@ func (r *journalReader) SeekToPosition(ctx context.Context, position string) err
 			return fmt.Errorf("seek head: %w", err)
 		}
 		r.last = ""
+		r.acked = ""
 		r.lastRealtime = 0
 		r.pending = nil
 		return nil
@@ -84,6 +86,7 @@ func (r *journalReader) SeekToPosition(ctx context.Context, position string) err
 	}
 	_, _ = r.j.Next()
 	r.last = position
+	r.acked = position
 	r.pending = nil
 	return nil
 }
@@ -92,9 +95,13 @@ func (r *journalReader) Next(ctx context.Context) (*JournalEntry, error) {
 	if len(r.pending) > 0 {
 		entry := r.pending[0]
 		r.pending = r.pending[1:]
+		// Pending entries may have been stamped before later Acks; expose the
+		// current acknowledged protocol position as Position for callers that
+		// inspect the entry before Ack.
+		entry.Position = r.acked
 		return entry, nil
 	}
-	entry, nextCursor, nextRealtime, err := r.readNext(ctx, r.j, r.last)
+	entry, nextCursor, nextRealtime, err := r.readNext(ctx, r.j, r.acked)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +110,16 @@ func (r *journalReader) Next(ctx context.Context) (*JournalEntry, error) {
 		r.lastRealtime = nextRealtime
 	}
 	return entry, nil
+}
+
+func (r *journalReader) Ack(entry *JournalEntry) {
+	if entry == nil {
+		return
+	}
+	entry.Position = r.acked
+	if entry.Cursor != "" {
+		r.acked = entry.Cursor
+	}
 }
 
 func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last string) (*JournalEntry, string, uint64, error) {
@@ -138,7 +155,8 @@ func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last
 		}
 		rec := journalEntryToRecord(entry)
 		if !r.serviceMatcher.Match(rec.SystemdUnit) {
-			// Keep continuity relative to last sent record only.
+			// Keep continuity relative to last acknowledged (sent) record only:
+			// do not advance the protocol position base for filtered entries.
 			continue
 		}
 		if rec.Message == "" {
@@ -188,7 +206,7 @@ func (r *journalReader) recoverFromCursor(ctx context.Context) error {
 		j.Close()
 		return fmt.Errorf("seek last known cursor %q: %w", r.last, err)
 	}
-	if err := r.swapRecoveredJournal(ctx, j, r.last); err != nil {
+	if err := r.swapRecoveredJournal(ctx, j); err != nil {
 		return fmt.Errorf("resume from last known cursor %q: %w", r.last, err)
 	}
 	return nil
@@ -203,14 +221,14 @@ func (r *journalReader) recoverFromRealtime(ctx context.Context) error {
 		j.Close()
 		return fmt.Errorf("seek past last good entry timestamp %d: %w", r.lastRealtime, err)
 	}
-	if err := r.swapRecoveredJournal(ctx, j, r.last); err != nil {
+	if err := r.swapRecoveredJournal(ctx, j); err != nil {
 		return fmt.Errorf("resume after timestamp %d: %w", r.lastRealtime, err)
 	}
 	return nil
 }
 
-func (r *journalReader) swapRecoveredJournal(ctx context.Context, j *sdjournal.Journal, last string) error {
-	entry, nextCursor, nextRealtime, err := r.readNext(ctx, j, last)
+func (r *journalReader) swapRecoveredJournal(ctx context.Context, j *sdjournal.Journal) error {
+	entry, nextCursor, nextRealtime, err := r.readNext(ctx, j, r.acked)
 	if err != nil {
 		j.Close()
 		return err

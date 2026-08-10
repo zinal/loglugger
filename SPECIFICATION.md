@@ -105,6 +105,8 @@ All timestamps transferred or persisted by Loglugger as typed timestamp values a
 
 The client sends raw `message` to the server and may additionally send `parsed` groups extracted by client-side regex parsing (`message_regex`, `systemd_unit_regex`).
 
+When `message_regex_no_match` is `skip`, records that do not match `message_regex` are discarded client-side and **must not** advance the acknowledged protocol position used for `current_position` / `next_position`. Position continuity (§4.3 / §5.3) is defined over the stream of sent records, the same way journal-level filters (`service_mask`, empty `MESSAGE`) preserve continuity relative to the last sent record.
+
 When `message_regex` is configured, the client also supports multiline merge:
 
 - Start with the current journal message text.

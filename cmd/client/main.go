@@ -143,17 +143,13 @@ func main() {
 		if entry == nil {
 			return nil
 		}
-		record := entry.Record
-		if parser != nil {
-			parsedRecord, ok := parser.Parse(record)
-			if !ok {
-				return nil
-			}
-			record = parsedRecord
+		if !client.AcceptEntry(journal, parser, entry) {
+			// Parser skip must not advance the acknowledged protocol position;
+			// journal.Next already moved the read cursor past this entry.
+			return nil
 		}
 		seqno := seqnoGenerator.Next()
-		record.SeqNo = &seqno
-		entry.Record = record
+		entry.Record.SeqNo = &seqno
 		batcher.Add(entry)
 
 		if batcher.ShouldFlush() {
