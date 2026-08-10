@@ -2,6 +2,11 @@
 
 Guidance for automated coding agents working in this repository.
 
+The formal product and protocol contract is
+[`SPECIFICATION.md`](SPECIFICATION.md). Treat it as authoritative when changing
+client/server behavior, position handling, batching, HTTP APIs, or deployment
+semantics, and update it in the same change set when those rules change.
+
 ## Changelog updates
 
 When a change is **user-visible or otherwise significant** (behavior, API/protocol,
