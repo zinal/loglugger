@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -100,10 +101,13 @@ func TestSendBatchReseeksOnPositionMismatch(t *testing.T) {
 		},
 	}
 
-	reset := sendBatch(context.Background(), journal, sender, &client.Batch{
+	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
 		CurrentPosition: "cursor-10",
 		NextPosition:    "cursor-11",
 	}, false)
+	if err != nil {
+		t.Fatalf("sendBatch() error = %v", err)
+	}
 
 	if reset {
 		t.Fatal("expected reset=false after successful reseek")
@@ -122,10 +126,13 @@ func TestSendBatchFallsBackToResetOnSeekFailure(t *testing.T) {
 		},
 	}
 
-	reset := sendBatch(context.Background(), journal, sender, &client.Batch{
+	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
 		CurrentPosition: "cursor-10",
 		NextPosition:    "cursor-11",
 	}, false)
+	if err != nil {
+		t.Fatalf("sendBatch() error = %v", err)
+	}
 
 	if !reset {
 		t.Fatal("expected reset=true when reseek fails")
@@ -135,6 +142,70 @@ func TestSendBatchFallsBackToResetOnSeekFailure(t *testing.T) {
 	}
 	if journal.seekCalls[1] != "" {
 		t.Fatalf("second seek = %q, want head reset", journal.seekCalls[1])
+	}
+}
+
+func TestSendBatchReturnsErrorOnClientError(t *testing.T) {
+	journal := &stubJournalReader{}
+	sender := stubSender{
+		err: client.ErrClientError{Message: "current_position is required when reset is false"},
+	}
+
+	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+		CurrentPosition: "cursor-10",
+		NextPosition:    "cursor-11",
+		Records:         []models.Record{{Message: "lost-if-continued"}},
+	}, false)
+	if err == nil {
+		t.Fatal("expected non-retryable send failure")
+	}
+	if !strings.Contains(err.Error(), "non-retryable send failure") {
+		t.Fatalf("error = %v, want non-retryable send failure wrapper", err)
+	}
+	var clientErr client.ErrClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("error = %v, want ErrClientError via errors.As", err)
+	}
+	if clientErr.Message != "current_position is required when reset is false" {
+		t.Fatalf("client error message = %q", clientErr.Message)
+	}
+	if reset {
+		t.Fatal("expected original reset=false to be preserved on failure")
+	}
+	if len(journal.seekCalls) != 0 {
+		t.Fatalf("seek calls = %v, want none on client error", journal.seekCalls)
+	}
+}
+
+func TestSendBatchReturnsErrorOnGenericNonRetryableFailure(t *testing.T) {
+	journal := &stubJournalReader{}
+	sender := stubSender{err: errors.New("HTTP 404: not found")}
+
+	_, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+		CurrentPosition: "cursor-10",
+		NextPosition:    "cursor-11",
+	}, true)
+	if err == nil {
+		t.Fatal("expected non-retryable send failure")
+	}
+	if !strings.Contains(err.Error(), "non-retryable send failure") {
+		t.Fatalf("error = %v, want non-retryable send failure wrapper", err)
+	}
+}
+
+func TestSendBatchIgnoresContextCancellation(t *testing.T) {
+	journal := &stubJournalReader{}
+	sender := stubSender{err: context.Canceled}
+
+	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+		CurrentPosition: "cursor-10",
+		NextPosition:    "cursor-11",
+	}, true)
+	if err != nil {
+		t.Fatalf("sendBatch() error = %v, want nil on cancellation", err)
+	}
+	if !reset {
+		t.Fatal("expected reset flag preserved on interruption")
 	}
 }
 

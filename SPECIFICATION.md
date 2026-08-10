@@ -134,7 +134,7 @@ When `message_regex` is configured, the client also supports multiline merge:
   - Batch submit: `POST /v1/batches`
 - **Transport**: HTTPS with TLS. The client verifies the server certificate using a configurable trust store (see §9.1). For mTLS, the client presents its own certificate.
 - **Multiple servers**: The client may be configured with multiple server base URLs. Endpoint selection is **sticky**: the client keeps using the current endpoint while requests succeed, and switches to the next endpoint only after a transient failure (network error or 5xx) during retry. As servers are stateless, they are expected to be connected to the same backing database.
-- **Retries**: Implement endless retry with exponential backoff for transient failures (5xx, network errors) so batches are not dropped during prolonged outages. Do not retry on 4xx (except possibly 409 with position mismatch—see server spec).
+- **Retries**: Implement endless retry with exponential backoff for transient failures (5xx, network errors) so batches are not dropped during prolonged outages. Do not retry on 4xx (except possibly 409 with position mismatch—see server spec). On non-retryable 4xx after a batch has been flushed from the in-memory buffer, the client must stop rather than continue reading journald; otherwise the flushed batch would be skipped (especially dangerous when the next send uses `reset: true`).
 - **Timeout**: Configurable request timeout.
 - **Client identification**: Each client instance should have a unique identifier (e.g., hostname + instance ID) for server-side position tracking.
 
@@ -601,6 +601,7 @@ Each configured attribute is provided as a list. The certificate subject value m
 | Journal corruption (`EBADMSG`) with recovery disabled | Log corruption, mention recovery option, and stop | Position stored on server remains unchanged |
 | Journal corruption (`EBADMSG`) with recovery enabled | Warn about possible data loss; try reopen/reseek recovery; on success resume with `reset: true`; on failure stop | Accept next successful recovery batch with reset; otherwise position stored on server remains unchanged |
 | YDB unavailable | Client retries; server returns 5xx | Fail batch; do not update position |
+| Non-retryable HTTP 4xx on batch submit (e.g. 400/401/403/404/422) | Do not retry; stop the process after logging the error so the already-flushed batch is not skipped; on restart, resume from the server-stored position | Reject batch; do not update position |
 | Duplicate batch (retry) | Client may retry same batch | Idempotent BulkUpsert; position already updated—reject with 409 if current_position no longer matches |
 
 ---

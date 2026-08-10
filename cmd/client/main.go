@@ -139,15 +139,15 @@ func main() {
 	)
 	emptyReads := 0
 	var emptySince time.Time
-	processEntry := func(entry *client.JournalEntry) {
+	processEntry := func(entry *client.JournalEntry) error {
 		if entry == nil {
-			return
+			return nil
 		}
 		record := entry.Record
 		if parser != nil {
 			parsedRecord, ok := parser.Parse(record)
 			if !ok {
-				return
+				return nil
 			}
 			record = parsedRecord
 		}
@@ -159,36 +159,56 @@ func main() {
 		if batcher.ShouldFlush() {
 			if batch := batcher.Flush(); batch != nil {
 				slog.Debug("flush by batch limit", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
-				reset = sendBatch(ctx, journal, sender, batch, reset)
+				var sendErr error
+				reset, sendErr = sendBatch(ctx, journal, sender, batch, reset)
+				if sendErr != nil {
+					return sendErr
+				}
 			}
 		}
+		return nil
 	}
-	drainExpiredMultiline := func(now time.Time) {
+	drainExpiredMultiline := func(now time.Time) error {
 		if multilineMerger == nil {
-			return
+			return nil
 		}
 		if ready := multilineMerger.DrainExpired(now); ready != nil {
-			processEntry(ready)
+			return processEntry(ready)
 		}
+		return nil
+	}
+	stopOnSendFailure := func(err error) {
+		slog.Error("send batch failed; stopping to avoid dropping the flushed batch", "error", err)
+		os.Exit(1)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			if multilineMerger != nil {
-				processEntry(multilineMerger.Drain())
+				if err := processEntry(multilineMerger.Drain()); err != nil {
+					stopOnSendFailure(err)
+				}
 			}
 			if batch := batcher.Flush(); batch != nil {
 				slog.Debug("flush on shutdown", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
-				_ = sendBatch(ctx, journal, sender, batch, reset)
+				if _, err := sendBatch(ctx, journal, sender, batch, reset); err != nil {
+					stopOnSendFailure(err)
+				}
 			}
 			slog.Info("shutting down")
 			return
 		case <-flushTicker.C:
-			drainExpiredMultiline(time.Now())
+			if err := drainExpiredMultiline(time.Now()); err != nil {
+				stopOnSendFailure(err)
+			}
 			if batch := batcher.Flush(); batch != nil {
 				slog.Debug("flush by timeout", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
-				reset = sendBatch(ctx, journal, sender, batch, reset)
+				var sendErr error
+				reset, sendErr = sendBatch(ctx, journal, sender, batch, reset)
+				if sendErr != nil {
+					stopOnSendFailure(sendErr)
+				}
 			}
 		default:
 		}
@@ -218,7 +238,9 @@ func main() {
 			if emptyReads%100 == 0 {
 				slog.Debug("journal has no new entries", "empty_reads", emptyReads)
 			}
-			drainExpiredMultiline(time.Now())
+			if err := drainExpiredMultiline(time.Now()); err != nil {
+				stopOnSendFailure(err)
+			}
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
@@ -241,11 +263,15 @@ func main() {
 		if multilineMerger != nil {
 			ready := multilineMerger.Add(entry, time.Now())
 			for _, merged := range ready {
-				processEntry(merged)
+				if err := processEntry(merged); err != nil {
+					stopOnSendFailure(err)
+				}
 			}
 			continue
 		}
-		processEntry(entry)
+		if err := processEntry(entry); err != nil {
+			stopOnSendFailure(err)
+		}
 	}
 }
 
@@ -434,7 +460,10 @@ func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bo
 	return resp.CurrentPosition, false, nil
 }
 
-func sendBatch(ctx context.Context, journal client.JournalReader, sender client.Sender, batch *client.Batch, reset bool) bool {
+// sendBatch submits a flushed batch. On success it returns the updated reset flag.
+// Transient failures are retried inside Sender; a returned error is non-retryable
+// (typically HTTP 4xx) and the caller must stop so the flushed batch is not skipped.
+func sendBatch(ctx context.Context, journal client.JournalReader, sender client.Sender, batch *client.Batch, reset bool) (bool, error) {
 	slog.Debug("sending batch",
 		"messages", len(batch.Records),
 		"message_bytes", totalMessageBytes(batch.Records),
@@ -452,10 +481,9 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			slog.Info("send interrupted", "error", err)
-			return reset
+			return reset, nil
 		}
-		slog.Error("send batch", "error", err)
-		return reset
+		return reset, fmt.Errorf("non-retryable send failure: %w", err)
 	}
 	slog.Debug("batch response received", "status", resp.Status, "expected_position", resp.ExpectedPosition, "message", resp.Message)
 	if resp.Status == "position_mismatch" {
@@ -466,17 +494,17 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 		)
 		if resp.ExpectedPosition != "" {
 			if err := journal.SeekToPosition(ctx, resp.ExpectedPosition); err == nil {
-				return false
+				return false, nil
 			}
 			slog.Warn("unable to seek to expected journal position; resetting to head", "expected_position", resp.ExpectedPosition)
 		}
 		if err := journal.SeekToPosition(ctx, ""); err != nil {
 			slog.Error("seek head after mismatch", "error", err)
-			return true
+			return true, nil
 		}
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 func totalMessageBytes(records []models.Record) int {
