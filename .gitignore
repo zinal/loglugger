@@ -3,6 +3,7 @@
 
 # Go build outputs
 /bin/
+/dist/
 *.exe
 *.exe~
 *.dll

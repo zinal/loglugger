@@ -27,6 +27,8 @@ English version: [README.md](README.md).
 
 Если целевые хосты старше машины сборки (например Ubuntu 20.04 с glibc 2.31) и `loglugger-client` падает с ошибкой `GLIBC_2.32' not found`, перед запуском плейбука пересоберите бинарники через `./build-docker.sh` (или `LOGLUGGER_PORTABLE=1 ./build.sh`).
 
+Для готового к поставке дерева (портативные бинарники + этот Ansible-пример) используйте `./build-ditto.sh` и запускайте плейбук из распакованного архива в каталоге `examples/ansible`.
+
 2. Убедитесь, что на целевых хостах уже есть сертификаты в `/opt/ydb/certs`:
 
 - `/opt/ydb/certs/ca.crt`
