@@ -130,7 +130,8 @@ loglugger_server_ydb_auth_password=change_me
 Значения по умолчанию для разбора логов YDBD в роли client:
 
 - `message_regex` извлекает `P_SERVICE`, `P_LEVEL` и `P_MESSAGE` из строк журнала YDBD
-- `systemd_unit_regex` извлекает `P_DBNAME` из юнитов вида `ydbd-database-a.service` и `ydbd-storage-a.service`
+- `systemd_unit_regex` извлекает `P_DBNAME` из юнитов БД вида `ydbd-database-a.service`
+- юниты хранения вроде `ydbd-storage.service` этому regex не соответствуют, поэтому `dbname` остаётся равным значению по умолчанию из mapping — `-` (у узлов хранения нет имени БД)
 - эти значения по умолчанию помогают избежать пустого `msg` и fallback-значений вроде `unknown`/`-` в сопоставляемых колонках YDB
 
 ## Сертификаты по умолчанию
