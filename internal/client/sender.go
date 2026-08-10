@@ -142,7 +142,20 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 
 		var batchResp models.BatchResponse
 		if err := json.Unmarshal(respBody, &batchResp); err != nil {
-			batchResp = models.BatchResponse{Status: "error", Message: string(respBody)}
+			// Match CurrentPosition: retry when the transport/status itself looks
+			// recoverable. Fabricating Status:"error" and returning success for
+			// 409 would make sendBatch skip reseek and drop the flushed batch.
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusConflict || resp.StatusCode >= 500 {
+				slog.Debug("decode batch response failed", "attempt", attempt+1, "endpoint", endpoint.baseURL, "status_code", resp.StatusCode, "error", err)
+				s.logCompletedRetryCycle("send batch", attempt+1)
+				s.advanceStartIndexOnFailure(endpointIdx)
+				continue
+			}
+			msg := string(respBody)
+			if msg == "" {
+				msg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+			}
+			return &models.BatchResponse{Status: "error", Message: msg}, ErrClientError{Message: msg}
 		}
 
 		switch resp.StatusCode {
@@ -150,6 +163,15 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 			s.markSuccess(endpointIdx)
 			return &batchResp, nil
 		case http.StatusConflict:
+			// Only a well-formed position_mismatch is actionable. Any other 409
+			// body must fail-stop so the caller does not treat the batch as accepted.
+			if batchResp.Status != "position_mismatch" {
+				msg := batchResp.Message
+				if msg == "" {
+					msg = fmt.Sprintf("HTTP 409 with unexpected status %q", batchResp.Status)
+				}
+				return &batchResp, ErrClientError{Message: msg}
+			}
 			s.markSuccess(endpointIdx)
 			return &batchResp, nil
 		default:
@@ -159,7 +181,7 @@ func (s *sender) Send(ctx context.Context, req *models.BatchRequest) (*models.Ba
 				s.advanceStartIndexOnFailure(endpointIdx)
 				continue
 			}
-			// Non-retryable HTTP errors (4xx except 409 above). Caller must fail-stop.
+			// Non-retryable HTTP errors (4xx except actionable 409 above). Caller must fail-stop.
 			msg := batchResp.Message
 			if msg == "" {
 				msg = fmt.Sprintf("HTTP %d", resp.StatusCode)

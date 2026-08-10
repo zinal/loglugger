@@ -563,6 +563,15 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 		}
 		return true, nil
 	}
+	if resp.Status != "ok" {
+		// Defense in depth: Sender should already fail non-actionable responses,
+		// but never treat an unexpected status as an accepted batch.
+		msg := resp.Message
+		if msg == "" {
+			msg = fmt.Sprintf("unexpected batch status %q", resp.Status)
+		}
+		return reset, fmt.Errorf("non-retryable send failure: %w", client.ErrClientError{Message: msg})
+	}
 	return false, nil
 }
 
