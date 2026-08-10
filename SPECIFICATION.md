@@ -8,7 +8,7 @@ Loglugger is a multi-component system for collecting log records from systemd jo
 - **Server**: Receives batches, validates position continuity, and writes to YDB using BulkUpsert.
 - **Extractor tool**: Reads records from YDB with query-time filters and writes them to TSV files with optional zstd compression.
 
-The system implements a **position-tracking protocol** to ensure exactly-once delivery semantics and ordered processing of log records per client.
+The system implements a **position-tracking protocol** to ensure the at-least-once delivery semantics and ordered processing of log records per client.
 
 All timestamps transferred or persisted by Loglugger as typed timestamp values are UTC. In particular, Unix-epoch timestamps are interpreted as UTC, and timezone-less values passed through the `timestamp64` transform are parsed as UTC before storage.
 
