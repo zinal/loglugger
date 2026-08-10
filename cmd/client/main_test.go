@@ -751,6 +751,23 @@ func writeTempClientConfig(t *testing.T, contents string) string {
 	return path
 }
 
+func TestLoadClientConfigFileRejectsUnknownKeys(t *testing.T) {
+	t.Parallel()
+
+	path := writeTempClientConfig(t, `
+server_url: https://localhost:27312
+bath_size: 10
+`)
+	var cfg clientConfig
+	err := loadClientConfigFile(path, &cfg)
+	if err == nil {
+		t.Fatal("expected error for unknown config key")
+	}
+	if !strings.Contains(err.Error(), "bath_size") {
+		t.Fatalf("error = %v, want mention of bath_size", err)
+	}
+}
+
 func TestIsJournalCorruption(t *testing.T) {
 	if !isJournalCorruption(syscall.EBADMSG) {
 		t.Fatal("EBADMSG should be treated as journal corruption")

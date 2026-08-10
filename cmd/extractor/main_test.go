@@ -311,6 +311,35 @@ ydb_open_timeout: 5s
 	if jsonCfg.YDBEndpoint != "grpcs://json.example:2135" {
 		t.Fatalf("json endpoint = %q", jsonCfg.YDBEndpoint)
 	}
+
+	fullPath := filepath.Join(dir, "full-server.yaml")
+	if err := os.WriteFile(fullPath, []byte(`
+listen_addr: ":27312"
+writer_backend: ydb
+ydb_endpoint: grpcs://full.example:2135
+ydb_database: /Root/full
+tls_cert_file: certs/server.crt
+tls_key_file: certs/server.key
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fullCfg, err := loadServerConfig(fullPath)
+	if err != nil {
+		t.Fatalf("loadServerConfig(full server yaml) error = %v", err)
+	}
+	if fullCfg.YDBEndpoint != "grpcs://full.example:2135" || fullCfg.YDBDatabase != "/Root/full" {
+		t.Fatalf("full cfg YDB fields = %#v", fullCfg)
+	}
+
+	badPath := filepath.Join(dir, "bad-server.yaml")
+	if err := os.WriteFile(badPath, []byte("ydb_endpoint: grpcs://x\nydb_endpont: grpcs://typo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadServerConfig(badPath); err == nil {
+		t.Fatal("expected error for unknown server config key")
+	} else if !strings.Contains(err.Error(), "ydb_endpont") {
+		t.Fatalf("error = %v, want mention of ydb_endpont", err)
+	}
 }
 
 func TestBuildQueryAndParams(t *testing.T) {

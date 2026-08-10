@@ -2,19 +2,17 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ydb-platform/loglugger/internal/buildinfo"
+	"github.com/ydb-platform/loglugger/internal/configdecode"
 	"github.com/ydb-platform/loglugger/internal/server"
-	"gopkg.in/yaml.v3"
 )
 
 type serverConfig struct {
@@ -235,16 +233,8 @@ func loadServerConfigFile(path string, cfg *serverConfig) error {
 	if err != nil {
 		return fmt.Errorf("read config file: %w", err)
 	}
-
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".json":
-		if err := json.Unmarshal(data, cfg); err != nil {
-			return fmt.Errorf("decode JSON config file: %w", err)
-		}
-	default:
-		if err := yaml.Unmarshal(data, cfg); err != nil {
-			return fmt.Errorf("decode YAML config file: %w", err)
-		}
+	if err := configdecode.DecodeStrict(path, data, cfg); err != nil {
+		return fmt.Errorf("decode config file: %w", err)
 	}
 	return nil
 }

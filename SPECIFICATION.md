@@ -439,7 +439,7 @@ Loglugger must include a dedicated extraction tool that reads records from the t
 
 #### 5.8.4 Database connection specification
 
-The tool should support reading the database connection parameters from the configuration files for the server component.
+The tool should support reading the database connection parameters from the configuration files for the server component. When a full server config file is supplied, unknown keys must still be rejected; non-YDB server keys may be present and ignored after decode.
 
 #### 5.8.5 Filtering parameters specification
 
@@ -508,7 +508,7 @@ loglugger/
 
 - **Context propagation**: Use `context.Context` for cancellation and timeouts in all I/O operations.
 - **Interfaces**: Define interfaces for journal reader, position store, and YDB writer to enable testing and swapping implementations.
-- **Configuration**: Use `github.com/spf13/viper` or struct-based config with env/flag overrides; avoid hardcoded values.
+- **Configuration**: Use struct-based YAML/JSON config with flag overrides; avoid hardcoded values. Decoding **must** reject unknown fields so typos fail at startup.
 - **Logging**: Use structured logging (`slog` or `zap`); avoid `log.Printf` in production code.
 - **Error handling**: Use `fmt.Errorf` with `%w` for error wrapping; check `errors.Is`/`errors.As` where appropriate.
 - **Graceful shutdown**: Handle `SIGINT`/`SIGTERM`; drain in-flight batches before exit.
@@ -528,6 +528,8 @@ loglugger/
 ---
 
 ## 8. Configuration Reference
+
+Client, server, extractor (when loading a server config file), and field-mapping YAML/JSON files are decoded **strictly**: unknown keys are rejected. A typo in a parameter name must fail startup (or mapping load) with an error that identifies the unknown field.
 
 ### 8.1 Client
 

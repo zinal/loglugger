@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ydb-platform/loglugger/internal/models"
@@ -73,5 +74,35 @@ func TestLoadFieldMappingsJSONArrayAndEmpty(t *testing.T) {
 	}
 	if _, err := LoadFieldMappings(emptyPath); err == nil {
 		t.Fatal("expected error for empty mapping file")
+	}
+}
+
+func TestLoadFieldMappingsRejectsUnknownKeys(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "mapping.yaml")
+	if err := os.WriteFile(yamlPath, []byte(`
+field_mapping:
+  - source: message
+    destination: msg
+    destiantion: typo
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFieldMappings(yamlPath); err == nil {
+		t.Fatal("expected error for unknown mapping key")
+	} else if !strings.Contains(err.Error(), "destiantion") {
+		t.Fatalf("error = %v, want mention of destiantion", err)
+	}
+
+	jsonPath := filepath.Join(dir, "mapping.json")
+	if err := os.WriteFile(jsonPath, []byte(`{"field_mapping":[{"source":"message","destination":"msg","destiantion":"typo"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFieldMappings(jsonPath); err == nil {
+		t.Fatal("expected error for unknown JSON mapping key")
+	} else if !strings.Contains(err.Error(), "destiantion") {
+		t.Fatalf("error = %v, want mention of destiantion", err)
 	}
 }
