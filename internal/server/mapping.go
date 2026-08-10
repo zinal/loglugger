@@ -10,6 +10,8 @@ import (
 
 	"github.com/go-faster/city"
 	"github.com/ydb-platform/loglugger/internal/models"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
 )
 
 // FieldMapping maps source field path to destination column.
@@ -122,8 +124,12 @@ func stableStringMap(in map[string]string) map[string]string {
 func applyTransform(value string, transform string) (interface{}, error) {
 	switch strings.TrimSpace(transform) {
 	case "", "string":
+		// Remains a Go string; YDB encoding uses the destination column type
+		// (e.g. Timestamp64 parses datetime strings, Int32 parses digits).
 		return value, nil
 	case "int":
+		// Go int is platform-sized; encodeYDBValue narrows/widens to the
+		// destination integer column (Int32/Int64/…).
 		v, err := strconv.Atoi(value)
 		if err != nil {
 			return nil, err
@@ -170,6 +176,103 @@ func applyTransform(value string, transform string) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("unsupported transform %q", transform)
 	}
+}
+
+// ValidateFieldMappingsAgainstColumns checks that each mapping destination
+// exists in the table schema and that the configured transform is compatible
+// with the column type. Call this after DescribeTable so mismatches surface
+// before BulkUpsert.
+func ValidateFieldMappingsAgainstColumns(mappings []FieldMapping, columns []options.Column) error {
+	byName := make(map[string]types.Type, len(columns))
+	for _, column := range columns {
+		byName[column.Name] = column.Type
+	}
+	for _, fm := range mappings {
+		dest := strings.TrimSpace(fm.Destination)
+		if dest == "" {
+			return fmt.Errorf("mapping %s: empty destination", fm.Source)
+		}
+		columnType, ok := byName[dest]
+		if !ok {
+			return fmt.Errorf("mapping %s -> %s: destination column not found in table schema", fm.Source, dest)
+		}
+		if err := checkTransformCompatibleWithColumn(fm.Transform, columnType); err != nil {
+			return fmt.Errorf("mapping %s -> %s: %w", fm.Source, dest, err)
+		}
+	}
+	return nil
+}
+
+func checkTransformCompatibleWithColumn(transform string, columnType types.Type) error {
+	targetType := columnType
+	if optional, inner := types.IsOptional(columnType); optional {
+		targetType = inner
+	}
+	if targetType == nil {
+		return fmt.Errorf("nil column type")
+	}
+	switch strings.TrimSpace(transform) {
+	case "", "string":
+		// Encoder coerces strings using the column type (Utf8, numbers, timestamps, …).
+		return nil
+	case "int", "int64":
+		if isSignedIntegerColumn(targetType) || isUnsignedIntegerColumn(targetType) || isFloatColumn(targetType) || isTextualColumn(targetType) {
+			return nil
+		}
+		return fmt.Errorf("transform %q is incompatible with column type %s", transform, targetType.Yql())
+	case "uint64":
+		if isUnsignedIntegerColumn(targetType) || isSignedIntegerColumn(targetType) || isFloatColumn(targetType) || isTextualColumn(targetType) {
+			return nil
+		}
+		return fmt.Errorf("transform %q is incompatible with column type %s", transform, targetType.Yql())
+	case "float64":
+		if isFloatColumn(targetType) || isTextualColumn(targetType) {
+			return nil
+		}
+		return fmt.Errorf("transform %q is incompatible with column type %s", transform, targetType.Yql())
+	case "bool":
+		if types.Equal(targetType, types.TypeBool) || isTextualColumn(targetType) {
+			return nil
+		}
+		return fmt.Errorf("transform %q is incompatible with column type %s", transform, targetType.Yql())
+	case "rfc3339", "timestamp64", "timestamp64_us":
+		if isTimestampColumn(targetType) || isTextualColumn(targetType) {
+			return nil
+		}
+		return fmt.Errorf("transform %q is incompatible with column type %s", transform, targetType.Yql())
+	default:
+		return fmt.Errorf("unsupported transform %q", transform)
+	}
+}
+
+func isTextualColumn(t types.Type) bool {
+	return types.Equal(t, types.TypeUTF8) ||
+		types.Equal(t, types.TypeBytes) ||
+		types.Equal(t, types.TypeJSON) ||
+		types.Equal(t, types.TypeJSONDocument) ||
+		types.Equal(t, types.TypeYSON)
+}
+
+func isSignedIntegerColumn(t types.Type) bool {
+	return types.Equal(t, types.TypeInt8) ||
+		types.Equal(t, types.TypeInt16) ||
+		types.Equal(t, types.TypeInt32) ||
+		types.Equal(t, types.TypeInt64)
+}
+
+func isUnsignedIntegerColumn(t types.Type) bool {
+	return types.Equal(t, types.TypeUint8) ||
+		types.Equal(t, types.TypeUint16) ||
+		types.Equal(t, types.TypeUint32) ||
+		types.Equal(t, types.TypeUint64)
+}
+
+func isFloatColumn(t types.Type) bool {
+	return types.Equal(t, types.TypeFloat) || types.Equal(t, types.TypeDouble)
+}
+
+func isTimestampColumn(t types.Type) bool {
+	return types.Equal(t, types.TypeTimestamp) || types.Equal(t, types.TypeTimestamp64)
 }
 
 func parseTimestamp64(value string) (time.Time, error) {

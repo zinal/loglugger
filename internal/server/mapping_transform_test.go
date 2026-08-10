@@ -2,10 +2,13 @@ package server
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ydb-platform/loglugger/internal/models"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
 )
 
 func TestApplyTransformAllTypes(t *testing.T) {
@@ -182,4 +185,73 @@ func TestLogTimestampMicrosecondsFallsBackToNow(t *testing.T) {
 	if value < before || value > after {
 		t.Fatalf("fallback timestamp %d outside [%d, %d]", value, before, after)
 	}
+}
+
+func TestValidateFieldMappingsAgainstColumns(t *testing.T) {
+	t.Parallel()
+
+	columns := []options.Column{
+		{Name: "log_dttm", Type: types.TypeTimestamp64},
+		{Name: "priority", Type: types.TypeInt32},
+		{Name: "message", Type: types.TypeUTF8},
+		{Name: "flag", Type: types.Optional(types.TypeBool)},
+	}
+
+	t.Run("accepts string mapping into Timestamp64", func(t *testing.T) {
+		t.Parallel()
+		err := ValidateFieldMappingsAgainstColumns([]FieldMapping{
+			{Source: "parsed.P_DTTM", Destination: "log_dttm"},
+			{Source: "priority", Destination: "priority", Transform: "int"},
+			{Source: "message", Destination: "message"},
+		}, columns)
+		if err != nil {
+			t.Fatalf("ValidateFieldMappingsAgainstColumns() error = %v", err)
+		}
+	})
+
+	t.Run("accepts int into Int32", func(t *testing.T) {
+		t.Parallel()
+		err := ValidateFieldMappingsAgainstColumns([]FieldMapping{
+			{Source: "priority", Destination: "priority", Transform: "int"},
+		}, columns)
+		if err != nil {
+			t.Fatalf("ValidateFieldMappingsAgainstColumns() error = %v", err)
+		}
+	})
+
+	t.Run("rejects unknown destination", func(t *testing.T) {
+		t.Parallel()
+		err := ValidateFieldMappingsAgainstColumns([]FieldMapping{
+			{Source: "message", Destination: "missing_col"},
+		}, columns)
+		if err == nil {
+			t.Fatal("expected error for unknown destination")
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("error = %v, want not found", err)
+		}
+	})
+
+	t.Run("rejects bool transform for Timestamp64", func(t *testing.T) {
+		t.Parallel()
+		err := ValidateFieldMappingsAgainstColumns([]FieldMapping{
+			{Source: "priority", Destination: "log_dttm", Transform: "bool"},
+		}, columns)
+		if err == nil {
+			t.Fatal("expected incompatible transform error")
+		}
+		if !strings.Contains(err.Error(), "incompatible") {
+			t.Fatalf("error = %v, want incompatible", err)
+		}
+	})
+
+	t.Run("rejects timestamp transform for Int32", func(t *testing.T) {
+		t.Parallel()
+		err := ValidateFieldMappingsAgainstColumns([]FieldMapping{
+			{Source: "parsed.P_DTTM", Destination: "priority", Transform: "timestamp64"},
+		}, columns)
+		if err == nil {
+			t.Fatal("expected incompatible transform error")
+		}
+	})
 }
