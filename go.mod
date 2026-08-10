@@ -1,8 +1,8 @@
 module github.com/ydb-platform/loglugger
 
-go 1.24.0
+go 1.26.0
 
-toolchain go1.24.5
+toolchain go1.26.5
 
 require (
 	github.com/coreos/go-systemd/v22 v22.5.0
