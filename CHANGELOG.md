@@ -12,6 +12,7 @@ High-level changes on `main` since the `v1.0` tag.
 
 ### Changed
 
+- YAML/JSON configuration and field-mapping files are decoded strictly: unknown keys (including typos) are rejected at load time.
 - Delivery semantics are documented as **at-least-once** (with ordered per-client processing), replacing the earlier exactly-once wording.
 - Client batch size limits are measured as the exact uncompressed JSON request body (default cap **15 MiB**), instead of an approximate uncompressed log-data budget.
 - Default server compressed request-body limit raised from 8 MiB to **16 MiB**, aligned with the client JSON cap and the existing 32 MiB decompressed limit.

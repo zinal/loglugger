@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,15 +11,14 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/ydb-platform/loglugger/internal/buildinfo"
 	"github.com/ydb-platform/loglugger/internal/client"
+	"github.com/ydb-platform/loglugger/internal/configdecode"
 	"github.com/ydb-platform/loglugger/internal/models"
-	"gopkg.in/yaml.v3"
 )
 
 type clientConfig struct {
@@ -478,15 +476,8 @@ func loadClientConfigFile(path string, cfg *clientConfig) error {
 	if err != nil {
 		return fmt.Errorf("read config file: %w", err)
 	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".json":
-		if err := json.Unmarshal(data, cfg); err != nil {
-			return fmt.Errorf("decode JSON config file: %w", err)
-		}
-	default:
-		if err := yaml.Unmarshal(data, cfg); err != nil {
-			return fmt.Errorf("decode YAML config file: %w", err)
-		}
+	if err := configdecode.DecodeStrict(path, data, cfg); err != nil {
+		return fmt.Errorf("decode config file: %w", err)
 	}
 	return nil
 }

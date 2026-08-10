@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -149,6 +151,23 @@ func TestFullTablePath(t *testing.T) {
 				t.Fatalf("fullTablePath(%q, %q) = %q, want %q", tc.database, tc.table, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadServerConfigFileRejectsUnknownKeys(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	if err := os.WriteFile(path, []byte("listen_addr: \":27312\"\nlistn_addr: \":1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var cfg serverConfig
+	err := loadServerConfigFile(path, &cfg)
+	if err == nil {
+		t.Fatal("expected error for unknown config key")
+	}
+	if !strings.Contains(err.Error(), "listn_addr") {
+		t.Fatalf("error = %v, want mention of listn_addr", err)
 	}
 }
 
