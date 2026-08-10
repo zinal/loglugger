@@ -135,6 +135,38 @@ func TestBatcher_FlushSplitsByJSONSize(t *testing.T) {
 	assertBatchJSONSize(t, "c", false, second)
 }
 
+func TestBatcher_ClearDropsJSONSplitRemainder(t *testing.T) {
+	b := NewBatcher(100, 0, "c").(*batcher)
+	b.maxJSONBytes = 120
+
+	if err := b.Add(&JournalEntry{Record: models.Record{Message: "123456"}, Position: "p1", Cursor: "p1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Add(&JournalEntry{Record: models.Record{Message: "123456"}, Position: "p2", Cursor: "p2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := b.Flush()
+	if first == nil || len(first.Records) != 1 {
+		t.Fatalf("unexpected first batch: %+v", first)
+	}
+	if len(b.entries) != 1 {
+		t.Fatalf("remainder entries = %d, want 1", len(b.entries))
+	}
+
+	b.Clear()
+	if len(b.entries) != 0 || len(b.recordJSONs) != 0 || b.journalCount != 0 {
+		t.Fatalf("Clear left state behind: entries=%d jsons=%d journalCount=%d",
+			len(b.entries), len(b.recordJSONs), b.journalCount)
+	}
+	if b.ShouldFlush() {
+		t.Fatal("ShouldFlush must be false after Clear")
+	}
+	if batch := b.Flush(); batch != nil {
+		t.Fatalf("Flush() after Clear = %+v, want nil", batch)
+	}
+}
+
 func TestBatcher_RejectsSingleOversizedRecord(t *testing.T) {
 	b := NewBatcher(10, 0, "c").(*batcher)
 	b.maxJSONBytes = 80

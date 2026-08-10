@@ -105,3 +105,19 @@ func TestMultilineMergerSplitsWhenLimitReached(t *testing.T) {
 		t.Fatalf("unexpected pending: %+v", pending)
 	}
 }
+
+func TestMultilineMergerDiscardDropsPending(t *testing.T) {
+	merger, err := NewMultilineMerger(`^INFO:.*$`, time.Second, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(10, 0)
+	_ = merger.Add(&JournalEntry{Record: models.Record{Message: "INFO: first"}, Position: "p0", Cursor: "c1"}, now)
+	merger.Discard()
+	if got := merger.Drain(); got != nil {
+		t.Fatalf("Drain() after Discard = %+v, want nil", got)
+	}
+	// Discard on nil receiver must be safe for disabled multiline mode.
+	var disabled *MultilineMerger
+	disabled.Discard()
+}

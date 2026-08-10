@@ -88,6 +88,7 @@ All timestamps transferred or persisted by Loglugger as typed timestamp values a
   - Journal was rotated or truncated; the server-provided position is no longer valid (including when `sd_journal_test_cursor` rejects the stored cursor).
   - The server returned `expected_position` due to mismatch and the client cannot resume from that position (e.g., journal history was lost).
   - Configuration change that invalidates position (e.g., filter mask change).
+- **Position mismatch / stream restart**: When the server returns HTTP `409` with `position_mismatch`, the client reseeks to `expected_position` or resets to head. Because batching may retain unsent records after a partial flush (JSON-size or record-count split), the client **must discard** any remaining in-memory batch buffer and unfinished multiline state before continuing. Leftover records still carry pre-mismatch `current_position` values and must not be sent after the stream restart (doing so can repeat `409` responses or attach stale records to a `reset: true` batch).
 
 ### 4.3.1 Journal Corruption Handling
 
@@ -100,7 +101,7 @@ All timestamps transferred or persisted by Loglugger as typed timestamp values a
   - If that still fails, try to seek to a point just after the timestamp of the last known good entry.
 - **Recovery warning**: When recovery is enabled and corruption is detected, the client must log a warning that some data loss is possible.
 - **Recovery result**:
-  - If recovery succeeds, the client resumes reading and must send the next batch with `reset: true`, because continuity relative to the previous server-side position may have been broken.
+  - If recovery succeeds, the client resumes reading and must send the next batch with `reset: true`, because continuity relative to the previous server-side position may have been broken. It must also discard any unsent in-memory batch buffer and unfinished multiline state, for the same reason as a position-mismatch stream restart (§4.3).
   - If recovery still fails, the client must stop and report that recovery is not possible.
 
 ### 4.3.2 Persistent Journal Read Failures

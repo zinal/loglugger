@@ -169,9 +169,13 @@ func main() {
 			if batch := batcher.Flush(); batch != nil {
 				slog.Debug("flush by batch limit", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
 				var sendErr error
-				reset, sendErr = sendBatch(sendCtx, journal, sender, batch, reset)
+				var streamRestarted bool
+				reset, streamRestarted, sendErr = sendBatch(sendCtx, journal, sender, batch, reset)
 				if sendErr != nil {
 					return sendErr
+				}
+				if streamRestarted {
+					discardUnsentBuffers(batcher, multilineMerger)
 				}
 			}
 		}
@@ -204,8 +208,10 @@ func main() {
 		}
 		if batch := batcher.Flush(); batch != nil {
 			slog.Debug("flush on shutdown", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
-			if _, err := sendBatch(flushCtx, journal, sender, batch, reset); err != nil {
+			if _, streamRestarted, err := sendBatch(flushCtx, journal, sender, batch, reset); err != nil {
 				stopOnSendFailure(err)
+			} else if streamRestarted {
+				discardUnsentBuffers(batcher, multilineMerger)
 			}
 		}
 		slog.Info("shutting down")
@@ -217,9 +223,12 @@ func main() {
 		if batch := batcher.Flush(); batch != nil {
 			slog.Debug("flush by timeout", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
 			var sendErr error
-			reset, sendErr = sendBatch(ctx, journal, sender, batch, reset)
+			var streamRestarted bool
+			reset, streamRestarted, sendErr = sendBatch(ctx, journal, sender, batch, reset)
 			if sendErr != nil {
 				stopOnSendFailure(sendErr)
+			} else if streamRestarted {
+				discardUnsentBuffers(batcher, multilineMerger)
 			}
 		}
 	}
@@ -242,6 +251,9 @@ func main() {
 					slog.Error(recoveryErr.Error(), "error", err)
 					os.Exit(1)
 				}
+				// Recovery repositions the journal stream; drop any unsent
+				// buffers that still carry pre-recovery protocol positions.
+				discardUnsentBuffers(batcher, multilineMerger)
 				if recoveredReset {
 					reset = true
 				}
@@ -573,10 +585,25 @@ func fetchStartupPosition(ctx context.Context, sender client.Sender) (string, bo
 	return resp.CurrentPosition, false, nil
 }
 
+// discardUnsentBuffers drops leftover batcher/multiline state after the journal
+// read stream is restarted. Partial JSON/count flushes can leave records whose
+// CurrentPosition still reflects the pre-mismatch stream; sending them next
+// would repeat 409s or attach stale records to a reset batch.
+func discardUnsentBuffers(batcher client.Batcher, multiline *client.MultilineMerger) {
+	if batcher != nil {
+		batcher.Clear()
+	}
+	if multiline != nil {
+		multiline.Discard()
+	}
+}
+
 // sendBatch submits a flushed batch. On success it returns the updated reset flag.
+// streamRestarted is true when the journal was reseeked or reset after a position
+// mismatch; the caller must discard any remaining unsent local buffers.
 // Transient failures are retried inside Sender; a returned error is non-retryable
 // (typically HTTP 4xx) and the caller must stop so the flushed batch is not skipped.
-func sendBatch(ctx context.Context, journal client.JournalReader, sender client.Sender, batch *client.Batch, reset bool) (bool, error) {
+func sendBatch(ctx context.Context, journal client.JournalReader, sender client.Sender, batch *client.Batch, reset bool) (bool, bool, error) {
 	slog.Debug("sending batch",
 		"messages", len(batch.Records),
 		"message_bytes", totalMessageBytes(batch.Records),
@@ -588,9 +615,9 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			slog.Info("send interrupted", "error", err)
-			return reset, nil
+			return reset, false, nil
 		}
-		return reset, fmt.Errorf("non-retryable send failure: %w", err)
+		return reset, false, fmt.Errorf("non-retryable send failure: %w", err)
 	}
 	slog.Debug("batch response received", "status", resp.Status, "expected_position", resp.ExpectedPosition, "message", resp.Message)
 	if resp.Status == "position_mismatch" {
@@ -601,15 +628,15 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 		)
 		if resp.ExpectedPosition != "" {
 			if err := journal.SeekToPosition(ctx, resp.ExpectedPosition); err == nil {
-				return false, nil
+				return false, true, nil
 			}
 			slog.Warn("unable to seek to expected journal position; resetting to head", "expected_position", resp.ExpectedPosition)
 		}
 		if err := journal.SeekToPosition(ctx, ""); err != nil {
 			slog.Error("seek head after mismatch", "error", err)
-			return true, nil
+			return true, true, nil
 		}
-		return true, nil
+		return true, true, nil
 	}
 	if resp.Status != "ok" {
 		// Defense in depth: Sender should already fail non-actionable responses,
@@ -618,9 +645,9 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 		if msg == "" {
 			msg = fmt.Sprintf("unexpected batch status %q", resp.Status)
 		}
-		return reset, fmt.Errorf("non-retryable send failure: %w", client.ErrClientError{Message: msg})
+		return reset, false, fmt.Errorf("non-retryable send failure: %w", client.ErrClientError{Message: msg})
 	}
-	return false, nil
+	return false, false, nil
 }
 
 func totalMessageBytes(records []models.Record) int {
