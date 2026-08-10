@@ -397,8 +397,11 @@ Loglugger must include a dedicated extraction tool that reads records from the t
 #### 5.8.2 File Format and Escaping
 
 - **Format**: Output format is tab-separated values (TSV).
-- **Tab normalization**: During extraction, TAB characters in text fields must be replaced with SPACE before writing rows.
-- **Row layout**: Each selected record is written as one TSV line with `\n` line terminator.
+- **Text escaping**: During extraction, text field values are escaped so that TAB/CR/LF do not break TSV structure. Before writing a cell, replace:
+  - TAB (`U+0009`) with the two-character sequence `\t`
+  - LF (`U+000A`) with the two-character sequence `\n`
+  - CR (`U+000D`) with the two-character sequence `\r`
+- **Row layout**: Each selected record is written as one TSV line with `\n` line terminator. Columns are separated by a literal TAB.
 
 #### 5.8.3 Compression and File Rotation
 

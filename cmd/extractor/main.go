@@ -584,7 +584,7 @@ func runExtraction(
 			}
 
 			for i := range scanners {
-				row[i] = normalizeTSVText(stringifyCell(scanners[i].value))
+				row[i] = escapeTSVText(stringifyCell(scanners[i].value))
 			}
 			if err := writer.WriteRow(row); err != nil {
 				return err
@@ -746,7 +746,9 @@ func stringifyCell(v any) string {
 	}
 }
 
-func normalizeTSVText(s string) string {
+// escapeTSVText replaces TAB/LF/CR with backslash escapes so cell values cannot
+// introduce extra columns or rows in TSV output.
+func escapeTSVText(s string) string {
 	if !strings.ContainsAny(s, "\t\n\r") {
 		return s
 	}
