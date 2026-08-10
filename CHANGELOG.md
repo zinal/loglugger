@@ -16,11 +16,9 @@ High-level changes on `main` since the `v1.0` tag.
 - Client batch size limits are measured as the exact uncompressed JSON request body (default cap **15 MiB**), instead of an approximate uncompressed log-data budget.
 - Default server compressed request-body limit raised from 8 MiB to **16 MiB**, aligned with the client JSON cap and the existing 32 MiB decompressed limit.
 - Go toolchain upgraded from 1.24.x to **1.26.5**.
-- Distribution packaging includes both `CHANGELOG*` files and `LICENSE`; `SPECIFICATION.md` and `AGENTS.md` stay repository-only. The project is licensed under **Apache License 2.0**.
 
 ### Added
 
-- `AGENTS.md` with a requirement to keep `CHANGELOG.md` and `CHANGELOG-ru.md` in sync for significant changes.
 - Configurable HTTP server timeouts (`read_header_timeout`, `read_timeout`, `write_timeout`, `idle_timeout`) to mitigate Slowloris and stalled connections.
 - Client fail-stop behavior for non-retryable batch HTTP failures (4xx other than handled position mismatch) and for persistent journald read I/O errors after a short retry window (~15s).
 - Stricter journald resume: stored cursors are verified with `sd_journal_test_cursor` so vacuumed/rotated positions reset instead of skipping records.
@@ -40,7 +38,6 @@ High-level changes on `main` since the `v1.0` tag.
 - Extractor output file creation is hardened; TSV escaping documentation matches the implementation (`\t` / `\n` / `\r`).
 - Final shutdown batch send is bounded by a short timeout so exit cannot hang indefinitely.
 - Client HTTP sender limits how much of error/response bodies are read into memory.
-- Example and specification docs updated for gzip `Content-Encoding` on batch POST, periodic multi-endpoint reshuffle, `client_id` uniqueness expectations, and the ydbd deployment examples.
 
 ### Security
 
