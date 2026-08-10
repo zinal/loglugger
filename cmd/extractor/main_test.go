@@ -99,7 +99,7 @@ func TestParseByteSize(t *testing.T) {
 	}
 }
 
-func TestStringifyCellAndNormalizeTSVText(t *testing.T) {
+func TestStringifyCellAndEscapeTSVText(t *testing.T) {
 	t.Parallel()
 
 	ts := time.Date(2025, 3, 13, 10, 0, 0, 0, time.UTC)
