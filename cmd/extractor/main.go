@@ -334,9 +334,9 @@ func parseConfig() (extractConfig, error) {
 	if cfg.OutputDir == "" {
 		return extractConfig{}, fmt.Errorf("output-dir must not be empty")
 	}
-	cfg.OutputPrefix = strings.TrimSpace(cfg.OutputPrefix)
-	if cfg.OutputPrefix == "" {
-		return extractConfig{}, fmt.Errorf("output-prefix must not be empty")
+	cfg.OutputPrefix, err = normalizeOutputPrefix(cfg.OutputPrefix)
+	if err != nil {
+		return extractConfig{}, err
 	}
 
 	if strings.TrimSpace(sizeRaw) == "" {
@@ -595,12 +595,16 @@ func runExtraction(
 }
 
 func newExtractionWriter(cfg extractConfig) (*extractionWriter, error) {
-	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
+	prefix, err := normalizeOutputPrefix(cfg.OutputPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(cfg.OutputDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create output-dir %s: %w", cfg.OutputDir, err)
 	}
 	w := &extractionWriter{
 		outputDir:    cfg.OutputDir,
-		outputPrefix: cfg.OutputPrefix,
+		outputPrefix: prefix,
 		zstdEnabled:  cfg.ZstdEnabled,
 		maxFileSize:  cfg.MaxFileSize,
 	}
@@ -652,8 +656,9 @@ func (w *extractionWriter) rotate() error {
 	if w.zstdEnabled {
 		fileName += ".zst"
 	}
+	// Keep the final path strictly under outputDir: prefix is basename-only.
 	path := filepath.Join(w.outputDir, fileName)
-	file, err := os.Create(path)
+	file, err := createExclusiveOutputFile(path)
 	if err != nil {
 		return fmt.Errorf("create output file %s: %w", path, err)
 	}
@@ -677,6 +682,26 @@ func (w *extractionWriter) rotate() error {
 		w.writer = encoder
 	}
 	return nil
+}
+
+// normalizeOutputPrefix forces a local basename so output-prefix cannot escape
+// output-dir via path separators or ".." components.
+func normalizeOutputPrefix(raw string) (string, error) {
+	prefix := filepath.Base(strings.TrimSpace(raw))
+	switch prefix {
+	case "", ".", "..":
+		return "", fmt.Errorf("output-prefix must be a non-empty local file name")
+	}
+	if strings.ContainsAny(prefix, `/\`) {
+		return "", fmt.Errorf("output-prefix must be a local file name without path separators")
+	}
+	return prefix, nil
+}
+
+// createExclusiveOutputFile creates path with O_EXCL so existing files and
+// symlinks are not followed or overwritten, and restricts mode to 0600.
+func createExclusiveOutputFile(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 }
 
 func (w *extractionWriter) closeCurrent() error {
