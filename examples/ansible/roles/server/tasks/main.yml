@@ -25,6 +25,7 @@
     src: "{{ loglugger_local_bin_dir }}/loglugger-server"
     dest: "{{ loglugger_prefix }}/bin/loglugger-server"
     mode: "0755"
+  notify: Restart loglugger-server
 
 - name: Install server config
   ansible.builtin.template:
