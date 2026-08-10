@@ -6,12 +6,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
@@ -151,7 +154,17 @@ func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last
 		}
 		entry, err := j.GetEntry()
 		if err != nil {
-			return nil, "", 0, fmt.Errorf("get entry: %w", err)
+			// Next() already advanced the journald cursor. Returning a non-corruption
+			// error here would make the main loop retry with another Next() and
+			// silently skip this entry. EBADMSG must still propagate so the caller
+			// can run the dedicated journal recovery path; other GetEntry failures
+			// (e.g. sdjournal "failed to parse field") are treated as a single
+			// unreadable record and skipped inside this loop, same as empty MESSAGE.
+			if isJournalCorruptionError(err) {
+				return nil, "", 0, fmt.Errorf("get entry: %w", err)
+			}
+			slog.Warn("skipping unreadable journal entry", "error", err)
+			continue
 		}
 		rec := journalEntryToRecord(entry)
 		if !r.serviceMatcher.Match(rec.SystemdUnit) {
@@ -170,6 +183,12 @@ func (r *journalReader) readNext(ctx context.Context, j *sdjournal.Journal, last
 		}
 		return &JournalEntry{Record: rec, Position: last, Cursor: entry.Cursor}, entry.Cursor, nextRealtime, nil
 	}
+}
+
+// isJournalCorruptionError reports whether err signals journald corruption that
+// must be handled by Recover (or stop), rather than skipping a single entry.
+func isJournalCorruptionError(err error) bool {
+	return errors.Is(err, syscall.EBADMSG)
 }
 
 func (r *journalReader) Recover(ctx context.Context) (bool, error) {
