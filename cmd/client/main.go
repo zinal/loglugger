@@ -149,6 +149,7 @@ func main() {
 	)
 	emptyReads := 0
 	var emptySince time.Time
+	var journalReadFailSince time.Time
 	processEntry := func(entry *client.JournalEntry) error {
 		if entry == nil {
 			return nil
@@ -227,6 +228,7 @@ func main() {
 				return
 			}
 			if isJournalCorruption(err) {
+				journalReadFailSince = time.Time{}
 				recoveredReset, recoveryErr := recoverFromJournalCorruption(ctx, journal, cfg.JournalRecovery)
 				if recoveryErr != nil {
 					slog.Error(recoveryErr.Error(), "error", err)
@@ -237,10 +239,27 @@ func main() {
 				}
 				continue
 			}
-			slog.Error("read journal", "error", err)
-			time.Sleep(100 * time.Millisecond)
+			if journalReadFailSince.IsZero() {
+				journalReadFailSince = time.Now()
+			}
+			failingFor := time.Since(journalReadFailSince)
+			slog.Error("read journal", "error", err, "failing_for", failingFor)
+			if journalReadFailureBudgetExceeded(failingFor) {
+				// Fail-stop so a process supervisor can restart/alert; endless
+				// 100ms retries leave the client "alive" while shipping stalls.
+				slog.Error("persistent journal read failures; stopping", "error", err, "failing_for", failingFor)
+				shutdown()
+				os.Exit(1)
+			}
+			select {
+			case <-ctx.Done():
+				shutdown()
+				return
+			case <-time.After(journalReadRetryDelay):
+			}
 			continue
 		}
+		journalReadFailSince = time.Time{}
 		if entry == nil {
 			emptyReads++
 			if emptyReads == 1 {
@@ -319,6 +338,18 @@ func parseClientConfig() (clientConfig, error) {
 	}
 	cfg.ServerURLs = shuffleServerURLs(cfg.ServerURLs)
 	return cfg, nil
+}
+
+const (
+	journalReadRetryDelay         = 100 * time.Millisecond
+	maxJournalReadFailureDuration = 15 * time.Second
+)
+
+// journalReadFailureBudgetExceeded reports whether non-corruption journal read
+// errors have persisted long enough that the client should stop rather than
+// retry forever while appearing healthy.
+func journalReadFailureBudgetExceeded(failingFor time.Duration) bool {
+	return failingFor >= maxJournalReadFailureDuration
 }
 
 func isJournalCorruption(err error) bool {

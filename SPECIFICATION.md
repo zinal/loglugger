@@ -101,6 +101,13 @@ All timestamps transferred or persisted by Loglugger as typed timestamp values a
   - If recovery succeeds, the client resumes reading and must send the next batch with `reset: true`, because continuity relative to the previous server-side position may have been broken.
   - If recovery still fails, the client must stop and report that recovery is not possible.
 
+### 4.3.2 Persistent Journal Read Failures
+
+- **Non-corruption I/O errors**: Journal read failures that are not `EBADMSG` / "bad message" and not caused by client cancellation (for example local journald I/O or wait failures) are treated as potentially transient.
+- **Bounded retry**: The client may retry such errors with a short delay for a limited window (on the order of ~15 seconds).
+- **Fail-stop**: If the same class of error persists beyond that window, the client must flush any already-buffered batch when possible and stop. Endless retry without exit or escalation is not allowed: the process would appear healthy while log shipping is stalled.
+- **Supervisor restart**: Stopping allows an external process supervisor to restart the client and/or raise an alert. On restart, the client resumes from the server-stored position (§4.3).
+
 ### 4.4 Message Payload
 
 The client sends raw `message` to the server and may additionally send `parsed` groups extracted by client-side regex parsing (`message_regex`, `systemd_unit_regex`).
@@ -616,6 +623,7 @@ Each configured attribute is provided as a list. The certificate subject value m
 | Journal rotation | If server-provided cursor cannot be used, send reset and restart from head | Accept with reset; update expected position |
 | Journal corruption (`EBADMSG`) with recovery disabled | Log corruption, mention recovery option, and stop | Position stored on server remains unchanged |
 | Journal corruption (`EBADMSG`) with recovery enabled | Warn about possible data loss; try reopen/reseek recovery; on success resume with `reset: true`; on failure stop | Accept next successful recovery batch with reset; otherwise position stored on server remains unchanged |
+| Persistent journal read I/O errors (non-corruption, e.g. local journald failures) | Retry briefly (~15s) with short delay; if errors persist, flush any buffered batch and stop so a supervisor can restart/alert; do not retry forever while appearing healthy | Position stored on server remains unchanged until a batch is accepted |
 | YDB unavailable | Client retries; server returns 5xx | Fail batch; do not update position |
 | Non-retryable HTTP 4xx on batch submit (e.g. 400/401/403/404/422) | Do not retry; stop the process after logging the error so the already-flushed batch is not skipped; on restart, resume from the server-stored position | Reject batch; do not update position |
 | Duplicate batch (retry) | Client may retry same batch | Idempotent BulkUpsert; position already updated—reject with 409 if current_position no longer matches |
