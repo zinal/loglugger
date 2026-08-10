@@ -438,6 +438,21 @@ func TestIsJournalCorruption(t *testing.T) {
 	}
 }
 
+func TestJournalReadFailureBudgetExceeded(t *testing.T) {
+	if journalReadFailureBudgetExceeded(0) {
+		t.Fatal("zero duration should not exceed the failure budget")
+	}
+	if journalReadFailureBudgetExceeded(maxJournalReadFailureDuration - time.Millisecond) {
+		t.Fatal("duration below budget should not stop the client")
+	}
+	if !journalReadFailureBudgetExceeded(maxJournalReadFailureDuration) {
+		t.Fatal("duration at budget should stop the client")
+	}
+	if !journalReadFailureBudgetExceeded(maxJournalReadFailureDuration + time.Second) {
+		t.Fatal("duration above budget should stop the client")
+	}
+}
+
 func TestRecoverFromJournalCorruptionDisabled(t *testing.T) {
 	_, err := recoverFromJournalCorruption(context.Background(), &stubJournalReader{}, false)
 	if err == nil {
