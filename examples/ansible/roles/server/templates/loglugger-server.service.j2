@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User={{ loglugger_server_user }}
-Group={{ loglugger_server_group }}
+User=root
+Group=root
 ExecStart={{ loglugger_prefix }}/bin/loglugger-server -config {{ loglugger_prefix }}/config/loglugger-server.yaml
 Restart=always
 RestartSec=5s

@@ -8,9 +8,8 @@ English version: [README.md](README.md).
 - `client` устанавливает и запускает `loglugger-client`
 
 По умолчанию обе роли используют сертификаты YDB из `/opt/ydb/certs`.
-Сервер запускается от отдельного системного пользователя `loglugger`. Основной
-конфигурационный файл, в котором может находиться пароль YDB, доступен только
-этому пользователю.
+Конфигурационный файл сервера устанавливается с правами `0600`, чтобы пароль
+YDB не был доступен всем локальным пользователям.
 
 ## Файлы
 
@@ -131,8 +130,6 @@ loglugger_server_ydb_auth_login=ydb_user
 
 - `loglugger_local_bin_dir` (по умолчанию: `{{ playbook_dir }}/../../bin`) — локальный каталог со собранными бинарниками
 - `loglugger_prefix` (по умолчанию: `/opt/ydb/loglugger`) — префикс установки на целевых хостах
-- `loglugger_server_user`, `loglugger_server_group` (по умолчанию: `loglugger`) — отдельная системная учётная запись сервера
-- `loglugger_server_additional_groups` — существующие группы, в которые нужно включить сервер для чтения внешних закрытых ключей TLS или CA-файлов
 - `loglugger_client_server_urls` — явный список URL серверов для клиента (например, `["https://s1:27312","https://s2:27312"]`)
 - `loglugger_server_listen_addr` — адрес прослушивания сервера Loglugger (например, `:27312`)
 - `loglugger_client_server_scheme`, `loglugger_client_server_port` — параметры генерации URL клиента по умолчанию

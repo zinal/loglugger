@@ -8,8 +8,8 @@ This example installs Loglugger with two roles:
 - `client` installs and starts `loglugger-client`
 
 By default, both roles use YDB certificates from `/opt/ydb/certs`.
-The server runs as the dedicated `loglugger` system user. Its main
-configuration, which can contain a YDB password, is readable only by that user.
+The server configuration file is installed with mode `0600` so a YDB password
+is not world-readable.
 
 ## Files
 
@@ -129,8 +129,6 @@ Set these in inventory/group vars/host vars as needed:
 
 - `loglugger_local_bin_dir` (default: `{{ playbook_dir }}/../../bin`) - local source directory for built binaries
 - `loglugger_prefix` (default: `/opt/ydb/loglugger`) - install prefix on target hosts
-- `loglugger_server_user`, `loglugger_server_group` (default: `loglugger`) - dedicated system account used by the server
-- `loglugger_server_additional_groups` - existing groups the server account must join to read externally managed TLS private keys or CA files
 - `loglugger_client_server_urls` - explicit client server URL list (e.g. `["https://s1:27312","https://s2:27312"]`)
 - `loglugger_server_listen_addr` - Loglugger server listen address (e.g. `:27312`)
 - `loglugger_client_server_scheme`, `loglugger_client_server_port` - default client URL generation controls
