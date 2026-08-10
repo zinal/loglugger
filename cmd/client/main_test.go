@@ -145,6 +145,41 @@ func TestSendBatchFallsBackToResetOnSeekFailure(t *testing.T) {
 	}
 }
 
+func TestSendBatchReturnsErrorOnUnexpectedStatus(t *testing.T) {
+	journal := &stubJournalReader{}
+	sender := stubSender{
+		resp: &models.BatchResponse{
+			Status:  "error",
+			Message: "gateway returned 409 with garbage body",
+		},
+	}
+
+	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+		CurrentPosition: "cursor-10",
+		NextPosition:    "cursor-11",
+		Records:         []models.Record{{Message: "must-not-skip"}},
+	}, false)
+	if err == nil {
+		t.Fatal("expected non-retryable send failure for unexpected status")
+	}
+	if !strings.Contains(err.Error(), "non-retryable send failure") {
+		t.Fatalf("error = %v, want non-retryable send failure wrapper", err)
+	}
+	var clientErr client.ErrClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("error = %v, want ErrClientError via errors.As", err)
+	}
+	if clientErr.Message != "gateway returned 409 with garbage body" {
+		t.Fatalf("client error message = %q", clientErr.Message)
+	}
+	if reset {
+		t.Fatal("expected original reset=false to be preserved on failure")
+	}
+	if len(journal.seekCalls) != 0 {
+		t.Fatalf("seek calls = %v, want none on unexpected status", journal.seekCalls)
+	}
+}
+
 func TestSendBatchReturnsErrorOnClientError(t *testing.T) {
 	journal := &stubJournalReader{}
 	sender := stubSender{

@@ -379,6 +379,115 @@ func TestSenderSendTriesNextEndpointOnEachRetryAttempt(t *testing.T) {
 	}
 }
 
+func TestSenderSendConflictRequiresPositionMismatch(t *testing.T) {
+	t.Parallel()
+
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"status":"error","message":"not a mismatch"}`))
+	}))
+	defer server.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{server.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+
+	resp, err := s.Send(context.Background(), &models.BatchRequest{
+		CurrentPosition: "cursor-1",
+		NextPosition:    "cursor-2",
+		Records:         []models.Record{{Message: "hello"}},
+	})
+	if err == nil {
+		t.Fatal("Send() error = nil, want ErrClientError for non-mismatch 409")
+	}
+	var clientErr ErrClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("Send() error = %v, want ErrClientError", err)
+	}
+	if clientErr.Message != "not a mismatch" {
+		t.Fatalf("ErrClientError.Message = %q, want %q", clientErr.Message, "not a mismatch")
+	}
+	if resp == nil || resp.Status != "error" {
+		t.Fatalf("Send() response = %+v, want status error", resp)
+	}
+	if hits != 1 {
+		t.Fatalf("hits = %d, want 1 (no retry on malformed 409 semantics)", hits)
+	}
+}
+
+func TestSenderSendRetriesInvalidJSONOnConflict(t *testing.T) {
+	t.Parallel()
+
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if hits == 1 {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte("proxy error page"))
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"status":"position_mismatch","expected_position":"cursor-9"}`))
+	}))
+	defer server.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{server.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+
+	resp, err := s.Send(context.Background(), &models.BatchRequest{
+		CurrentPosition: "cursor-1",
+		NextPosition:    "cursor-2",
+		Records:         []models.Record{{Message: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if resp == nil || resp.Status != "position_mismatch" || resp.ExpectedPosition != "cursor-9" {
+		t.Fatalf("Send() response = %+v, want position_mismatch/cursor-9", resp)
+	}
+	if hits != 2 {
+		t.Fatalf("hits = %d, want 2 (retry after invalid JSON 409)", hits)
+	}
+}
+
+func TestSenderSendConflictPositionMismatch(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"status":"position_mismatch","expected_position":"cursor-42"}`))
+	}))
+	defer server.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{server.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+
+	resp, err := s.Send(context.Background(), &models.BatchRequest{
+		CurrentPosition: "cursor-1",
+		NextPosition:    "cursor-2",
+		Records:         []models.Record{{Message: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if resp == nil || resp.Status != "position_mismatch" || resp.ExpectedPosition != "cursor-42" {
+		t.Fatalf("Send() response = %+v, want position_mismatch/cursor-42", resp)
+	}
+}
+
 func TestSenderSendDoesNotRetryOn4xx(t *testing.T) {
 	t.Parallel()
 
