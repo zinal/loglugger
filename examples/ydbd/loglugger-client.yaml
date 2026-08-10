@@ -13,6 +13,7 @@ batch_timeout: "5s"
 http_timeout: "30s"
 retry_delay: "1s"
 
-tls_ca_file: "/opt/ydb/loglugger/certs/ca.crt"
-tls_cert_file: "/opt/ydb/loglugger/certs/client.crt"
-tls_key_file: "/opt/ydb/loglugger/certs/client.key"
+# Reuse YDB node certificates (same paths as examples/ansible).
+tls_ca_file: "/opt/ydb/certs/ca.crt"
+tls_cert_file: "/opt/ydb/certs/node.crt"
+tls_key_file: "/opt/ydb/certs/node.key"
