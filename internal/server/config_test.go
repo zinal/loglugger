@@ -130,6 +130,57 @@ func TestQuoteYDBPath(t *testing.T) {
 	}
 }
 
+func TestYDBDSN(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		endpoint string
+		database string
+		want     string
+	}{
+		{
+			name:     "typical absolute database path",
+			endpoint: "grpcs://host:2135",
+			database: "/local",
+			want:     "grpcs://host:2135/local",
+		},
+		{
+			name:     "nested database path",
+			endpoint: "grpcs://host:2135",
+			database: "/Root/db",
+			want:     "grpcs://host:2135/Root/db",
+		},
+		{
+			name:     "database without leading slash",
+			endpoint: "grpcs://host:2135",
+			database: "local",
+			want:     "grpcs://host:2135/local",
+		},
+		{
+			name:     "endpoint with trailing slash",
+			endpoint: "grpcs://host:2135/",
+			database: "/local",
+			want:     "grpcs://host:2135/local",
+		},
+		{
+			name:     "trims surrounding whitespace",
+			endpoint: "  grpcs://host:2135  ",
+			database: "  /local  ",
+			want:     "grpcs://host:2135/local",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ydbDSN(tc.endpoint, tc.database); got != tc.want {
+				t.Fatalf("ydbDSN(%q, %q) = %q, want %q", tc.endpoint, tc.database, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestYDBAuthOptionValidation(t *testing.T) {
 	tests := []struct {
 		name    string

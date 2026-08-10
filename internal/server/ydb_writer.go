@@ -667,7 +667,7 @@ func openYDBDriver(ctx context.Context, endpoint, database string, auth YDBAuthO
 	if database == "" {
 		return nil, fmt.Errorf("ydb database setting is required")
 	}
-	dsn := fmt.Sprintf("%s/%s", endpoint, database)
+	dsn := ydbDSN(endpoint, database)
 	authOption, err := ydbAuthOption(auth)
 	if err != nil {
 		return nil, err
@@ -731,4 +731,13 @@ func ydbAuthOption(auth YDBAuthOptions) (ydb.Option, error) {
 
 func quoteYDBPath(path string) string {
 	return "`" + strings.ReplaceAll(path, "`", "_") + "`"
+}
+
+// ydbDSN builds a ydb-go-sdk connection string from endpoint and database.
+// Database paths are typically absolute (e.g. "/local"); joining must not
+// introduce a double slash after the endpoint host.
+func ydbDSN(endpoint, database string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	database = strings.TrimSpace(database)
+	return strings.TrimRight(endpoint, "/") + "/" + strings.TrimLeft(database, "/")
 }
