@@ -104,7 +104,7 @@ All timestamps transferred or persisted by Loglugger as typed timestamp values a
 ### 4.3.2 Persistent Journal Read Failures
 
 - **Non-corruption I/O errors**: Journal read failures that are not `EBADMSG` / "bad message" and not caused by client cancellation (for example local journald I/O or wait failures) are treated as potentially transient.
-- **Bounded retry**: The client may retry such errors with a short delay for a limited window (on the order of a few seconds).
+- **Bounded retry**: The client may retry such errors with a short delay for a limited window (on the order of ~15 seconds).
 - **Fail-stop**: If the same class of error persists beyond that window, the client must flush any already-buffered batch when possible and stop. Endless retry without exit or escalation is not allowed: the process would appear healthy while log shipping is stalled.
 - **Supervisor restart**: Stopping allows an external process supervisor to restart the client and/or raise an alert. On restart, the client resumes from the server-stored position (§4.3).
 
