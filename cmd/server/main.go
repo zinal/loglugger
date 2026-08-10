@@ -304,7 +304,11 @@ func ydbAuthConfig(cfg serverConfig) server.YDBAuthOptions {
 	}
 }
 
+// fullTablePath joins database and table into a scheme path for native YDB APIs
+// (BulkUpsert, DescribeTable). Absolute table paths (leading "/") are left unchanged.
 func fullTablePath(database, table string) string {
+	table = strings.TrimSpace(table)
+	database = strings.TrimSpace(database)
 	if strings.HasPrefix(table, "/") || database == "" {
 		return table
 	}

@@ -104,6 +104,54 @@ func TestParseHTTPServerTimeoutsRejectsNonPositive(t *testing.T) {
 	}
 }
 
+func TestFullTablePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		database string
+		table    string
+		want     string
+	}{
+		{
+			name:     "relative table under absolute database",
+			database: "/local",
+			table:    "ydblogs",
+			want:     "/local/ydblogs",
+		},
+		{
+			name:     "nested database path",
+			database: "/Root/db",
+			table:    "logs",
+			want:     "/Root/db/logs",
+		},
+		{
+			name:     "absolute table path unchanged",
+			database: "/local",
+			table:    "/Root/db/logs",
+			want:     "/Root/db/logs",
+		},
+		{
+			name:     "empty database keeps table as-is",
+			database: "",
+			table:    "logs",
+			want:     "logs",
+		},
+		{
+			name:     "trims surrounding whitespace",
+			database: "  /local  ",
+			table:    "  ydblogs  ",
+			want:     "/local/ydblogs",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fullTablePath(tc.database, tc.table); got != tc.want {
+				t.Fatalf("fullTablePath(%q, %q) = %q, want %q", tc.database, tc.table, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewWriterRejectsInvalidYDBOpenTimeout(t *testing.T) {
 	cfg := defaultServerConfig()
 	cfg.WriterBackend = "ydb"
