@@ -101,7 +101,7 @@ func TestSendBatchReseeksOnPositionMismatch(t *testing.T) {
 		},
 	}
 
-	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+	reset, streamRestarted, err := sendBatch(context.Background(), journal, sender, &client.Batch{
 		CurrentPosition: "cursor-10",
 		NextPosition:    "cursor-11",
 	}, false)
@@ -111,6 +111,9 @@ func TestSendBatchReseeksOnPositionMismatch(t *testing.T) {
 
 	if reset {
 		t.Fatal("expected reset=false after successful reseek")
+	}
+	if !streamRestarted {
+		t.Fatal("expected streamRestarted=true after mismatch reseek")
 	}
 	if len(journal.seekCalls) != 1 || journal.seekCalls[0] != "cursor-42" {
 		t.Fatalf("seek calls = %v, want [cursor-42]", journal.seekCalls)
@@ -126,7 +129,7 @@ func TestSendBatchFallsBackToResetOnSeekFailure(t *testing.T) {
 		},
 	}
 
-	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+	reset, streamRestarted, err := sendBatch(context.Background(), journal, sender, &client.Batch{
 		CurrentPosition: "cursor-10",
 		NextPosition:    "cursor-11",
 	}, false)
@@ -136,6 +139,9 @@ func TestSendBatchFallsBackToResetOnSeekFailure(t *testing.T) {
 
 	if !reset {
 		t.Fatal("expected reset=true when reseek fails")
+	}
+	if !streamRestarted {
+		t.Fatal("expected streamRestarted=true after mismatch reset")
 	}
 	if len(journal.seekCalls) != 2 {
 		t.Fatalf("seek calls = %v, want reseek then head", journal.seekCalls)
@@ -154,7 +160,7 @@ func TestSendBatchReturnsErrorOnUnexpectedStatus(t *testing.T) {
 		},
 	}
 
-	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+	reset, streamRestarted, err := sendBatch(context.Background(), journal, sender, &client.Batch{
 		CurrentPosition: "cursor-10",
 		NextPosition:    "cursor-11",
 		Records:         []models.Record{{Message: "must-not-skip"}},
@@ -175,6 +181,9 @@ func TestSendBatchReturnsErrorOnUnexpectedStatus(t *testing.T) {
 	if reset {
 		t.Fatal("expected original reset=false to be preserved on failure")
 	}
+	if streamRestarted {
+		t.Fatal("expected streamRestarted=false on unexpected status")
+	}
 	if len(journal.seekCalls) != 0 {
 		t.Fatalf("seek calls = %v, want none on unexpected status", journal.seekCalls)
 	}
@@ -186,7 +195,7 @@ func TestSendBatchReturnsErrorOnClientError(t *testing.T) {
 		err: client.ErrClientError{Message: "current_position is required when reset is false"},
 	}
 
-	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+	reset, streamRestarted, err := sendBatch(context.Background(), journal, sender, &client.Batch{
 		CurrentPosition: "cursor-10",
 		NextPosition:    "cursor-11",
 		Records:         []models.Record{{Message: "lost-if-continued"}},
@@ -207,6 +216,9 @@ func TestSendBatchReturnsErrorOnClientError(t *testing.T) {
 	if reset {
 		t.Fatal("expected original reset=false to be preserved on failure")
 	}
+	if streamRestarted {
+		t.Fatal("expected streamRestarted=false on client error")
+	}
 	if len(journal.seekCalls) != 0 {
 		t.Fatalf("seek calls = %v, want none on client error", journal.seekCalls)
 	}
@@ -216,7 +228,7 @@ func TestSendBatchReturnsErrorOnGenericNonRetryableFailure(t *testing.T) {
 	journal := &stubJournalReader{}
 	sender := stubSender{err: errors.New("HTTP 404: not found")}
 
-	_, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+	_, streamRestarted, err := sendBatch(context.Background(), journal, sender, &client.Batch{
 		CurrentPosition: "cursor-10",
 		NextPosition:    "cursor-11",
 	}, true)
@@ -226,13 +238,16 @@ func TestSendBatchReturnsErrorOnGenericNonRetryableFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "non-retryable send failure") {
 		t.Fatalf("error = %v, want non-retryable send failure wrapper", err)
 	}
+	if streamRestarted {
+		t.Fatal("expected streamRestarted=false on non-retryable failure")
+	}
 }
 
 func TestSendBatchIgnoresContextCancellation(t *testing.T) {
 	journal := &stubJournalReader{}
 	sender := stubSender{err: context.Canceled}
 
-	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+	reset, streamRestarted, err := sendBatch(context.Background(), journal, sender, &client.Batch{
 		CurrentPosition: "cursor-10",
 		NextPosition:    "cursor-11",
 	}, true)
@@ -242,13 +257,16 @@ func TestSendBatchIgnoresContextCancellation(t *testing.T) {
 	if !reset {
 		t.Fatal("expected reset flag preserved on interruption")
 	}
+	if streamRestarted {
+		t.Fatal("expected streamRestarted=false on interruption")
+	}
 }
 
 func TestSendBatchIgnoresContextDeadlineExceeded(t *testing.T) {
 	journal := &stubJournalReader{}
 	sender := stubSender{err: context.DeadlineExceeded}
 
-	reset, err := sendBatch(context.Background(), journal, sender, &client.Batch{
+	reset, streamRestarted, err := sendBatch(context.Background(), journal, sender, &client.Batch{
 		CurrentPosition: "cursor-10",
 		NextPosition:    "cursor-11",
 	}, true)
@@ -257,6 +275,53 @@ func TestSendBatchIgnoresContextDeadlineExceeded(t *testing.T) {
 	}
 	if !reset {
 		t.Fatal("expected reset flag preserved on interruption")
+	}
+	if streamRestarted {
+		t.Fatal("expected streamRestarted=false on interruption")
+	}
+}
+
+func TestDiscardUnsentBuffersClearsBatcherRemainderAndMultiline(t *testing.T) {
+	// maxSize=1 forces a partial flush remainder, the same class of leftover
+	// state JSON-size splits leave behind on 409/reseek.
+	batcher := client.NewBatcher(1, 0, "c")
+	if err := batcher.Add(&client.JournalEntry{
+		Record: models.Record{Message: "first"}, Position: "p1", Cursor: "p1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := batcher.Add(&client.JournalEntry{
+		Record: models.Record{Message: "second"}, Position: "p2", Cursor: "p2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := batcher.Flush()
+	if first == nil || len(first.Records) != 1 {
+		t.Fatalf("first flush = %+v, want 1 record", first)
+	}
+	if !batcher.ShouldFlush() {
+		t.Fatal("remainder should still be flushable before discard")
+	}
+
+	merger, err := client.NewMultilineMerger(`^START`, time.Second, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := merger.Add(&client.JournalEntry{
+		Record: models.Record{Message: "START pending"}, Cursor: "c-pending",
+	}, time.Unix(1, 0)); len(out) != 0 {
+		t.Fatalf("unexpected multiline output: %+v", out)
+	}
+
+	discardUnsentBuffers(batcher, merger)
+	if batcher.ShouldFlush() {
+		t.Fatal("batcher remainder must be cleared after stream restart")
+	}
+	if batch := batcher.Flush(); batch != nil {
+		t.Fatalf("Flush() after Clear = %+v, want nil", batch)
+	}
+	if drained := merger.Drain(); drained != nil {
+		t.Fatalf("multiline pending survived Discard: %+v", drained)
 	}
 }
 

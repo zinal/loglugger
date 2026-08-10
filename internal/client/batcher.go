@@ -31,6 +31,10 @@ type Batcher interface {
 	Add(entry *JournalEntry) error
 	Flush() *Batch
 	ShouldFlush() bool
+	// Clear drops all buffered entries without producing a batch. Used when the
+	// journal stream is restarted (position mismatch reseek/reset, recovery) so
+	// leftover records cannot be sent with stale CurrentPosition values.
+	Clear()
 }
 
 type batcher struct {
@@ -190,6 +194,15 @@ func (b *batcher) ShouldFlush() bool {
 		return true
 	}
 	return false
+}
+
+func (b *batcher) Clear() {
+	b.entries = b.entries[:0]
+	b.recordJSONs = b.recordJSONs[:0]
+	b.recordsArrayBytes = 0
+	b.bufferedJSONBytes = 0
+	b.journalCount = 0
+	b.startedAt = time.Time{}
 }
 
 func (b *batcher) nextPosition() string {

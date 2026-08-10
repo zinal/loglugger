@@ -85,3 +85,15 @@ func (m *MultilineMerger) Drain() *JournalEntry {
 	m.pendingCount = 0
 	return out
 }
+
+// Discard drops any unfinished multiline entry without emitting it. Used when
+// the journal stream is restarted so a partial merge cannot be sent with a
+// stale protocol position.
+func (m *MultilineMerger) Discard() {
+	if m == nil {
+		return
+	}
+	m.pending = nil
+	m.pendingCount = 0
+	m.lastAppendAt = time.Time{}
+}
