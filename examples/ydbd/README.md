@@ -8,7 +8,9 @@ This folder contains a complete `ydbd`-oriented Loglugger example:
 - `loglugger-client.yaml` - client journal/parsing/TLS settings.
 - `ydb-loglugger-server.service` - systemd startup unit for the server.
 - `ydb-loglugger-client.service` - systemd startup unit for the client.
-- `ydb-loglugger-client.env` - example variables for the systemd unit.
+- `ydb-loglugger-client.env` - example `EnvironmentFile` for the client unit; install as `/etc/default/ydb-loglugger-client`.
+
+TLS paths in the YAML configs reuse typical YDB node certificates from `/opt/ydb/certs` (`ca.crt`, `node.crt`, `node.key`), same as the Ansible example.
 
 ### Extraction Example
 
@@ -20,7 +22,7 @@ Use `loglugger-extractor` to export YDB rows into rotating TSV files:
   -from 2025-03-13T10:00:00Z \
   -to 2025-03-13T11:00:00Z \
   -filter dbname=local,prod \
-  -filter service_name=ydbd \
+  -filter service=ydbd \
   -zstd \
   -output-dir ./out
 ```
@@ -28,7 +30,7 @@ Use `loglugger-extractor` to export YDB rows into rotating TSV files:
 Notes:
 
 - Time filter is required (`-from`, `-to`) and is applied as `[from,to)`.
-- Optional `-filter field=v1,v2` flags add `IN` filters to SQL.
+- Optional `-filter field=v1,v2` flags add `IN` filters to SQL. Filter field names must match target table columns (see `target_table.sql`).
 - Rotation defaults: `200MiB` for plain TSV, `10MiB` with `-zstd` (override via `-max-file-size`).
 
 ### Mapping Notes

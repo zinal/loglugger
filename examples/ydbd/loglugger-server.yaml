@@ -19,7 +19,7 @@ ydb_auth_mode: "anonymous" # anonymous|static|service-account-key|metadata
 # ydb_auth_metadata_url: ""
 # ydb_ca_path: "/opt/ydb/certs/ca.crt"
 
-# mTLS server settings (same model as the default example).
-tls_cert_file: "/opt/ydb/loglugger/certs/server.crt"
-tls_key_file: "/opt/ydb/loglugger/certs/server.key"
-tls_ca_file: "/opt/ydb/loglugger/certs/ca.crt"
+# mTLS server settings: reuse YDB node certificates (same paths as examples/ansible).
+tls_cert_file: "/opt/ydb/certs/node.crt"
+tls_key_file: "/opt/ydb/certs/node.key"
+tls_ca_file: "/opt/ydb/certs/ca.crt"
