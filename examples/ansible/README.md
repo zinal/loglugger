@@ -11,7 +11,8 @@ By default, both roles use YDB certificates from `/opt/ydb/certs`.
 
 - `playbook.yml` - main playbook with `server` and `client` plays
 - `inventory.example.ini` - sample inventory
-- `roles/server` - server role (binary, config, systemd unit)
+- `target_table.sql` - YDB schema for the log table and position store (same as `examples/ydbd/target_table.sql`)
+- `roles/server` - server role (binary, config, field mapping, systemd unit)
 - `roles/client` - client role (binary, config, systemd unit)
 
 ## Prerequisites
@@ -27,6 +28,11 @@ By default, both roles use YDB certificates from `/opt/ydb/certs`.
 - `/opt/ydb/certs/ca.crt`
 - `/opt/ydb/certs/node.crt`
 - `/opt/ydb/certs/node.key`
+
+3. Create the YDB tables before starting the server (see `target_table.sql`):
+
+- log table (`ydblogs` by default)
+- position table (`loglugger_positions` by default)
 
 ## Usage
 
@@ -90,7 +96,7 @@ How this works:
 
 YDB table mapping note:
 
-- the Ansible server role installs `field_mapping.yaml` compatible with `examples/ydbd/target_table.sql`
+- the Ansible server role installs `field_mapping.yaml` compatible with `target_table.sql` / `examples/ydbd/target_table.sql`
 - required YDB columns mapped by default: `ts_log`, `seqno`, `hostname`, `message_hash`
 - if you use a different YDB schema, override `loglugger_server_field_mapping_file` and provide your own mapping file
 
@@ -105,14 +111,18 @@ Set these in inventory/group vars/host vars as needed:
 - `loglugger_client_server_scheme`, `loglugger_client_server_port` - default client URL generation controls
 - `loglugger_client_service_mask` (default: `regex:^ydbd-.*\\.service$`)
 - `loglugger_client_message_regex`, `loglugger_client_systemd_unit_regex`
+- `loglugger_client_journal_recovery` (default: `true`)
 - `loglugger_server_ydb_endpoint`, `loglugger_server_ydb_database`, `loglugger_server_ydb_table`
-- `loglugger_server_ydb_auth_mode` (`anonymous` or `static`)
+- `loglugger_server_ydb_auth_mode` (`anonymous` or `static`; Ansible template does not wire `service-account-key` / `metadata`)
 - `loglugger_server_ydb_auth_login`, `loglugger_server_ydb_auth_password` (required for `static`)
+- `loglugger_server_ydb_open_timeout`, `loglugger_server_ydb_ca_path`
+- `loglugger_server_position_table` (default: `loglugger_positions`)
+- `loglugger_cert_dir`, `loglugger_server_tls_*`, `loglugger_client_tls_*` - certificate paths
 
 Client server URL behavior:
 
 - by default, the client role builds `server_urls` from inventory hosts in `loglugger_server`
-- each URL uses `https://<ansible_host>:27312` (or inventory hostname when `ansible_host` is not set)
+- each URL uses `<scheme>://<ansible_host>:<port>` (defaults: `https`, port `27312`; inventory hostname is used when `ansible_host` is not set)
 - you can override in `playbook.yml` via `loglugger_client_server_urls_override`
 
 YDBD parsing defaults in the client role:

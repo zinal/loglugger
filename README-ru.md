@@ -1,6 +1,6 @@
 # Loglugger
 
-Двухкомпонентная система для сбора журналов из systemd journald и сохранения их в целевое хранилище (YDB или имитационный бэкенд для тестирования).
+Трёхкомпонентная система для сбора журналов из systemd journald, сохранения их в целевое хранилище (YDB или имитационный бэкенд для тестирования) и извлечения исторических данных из YDB.
 
 Формальная спецификация: [SPECIFICATION.md](SPECIFICATION.md).
 
@@ -14,7 +14,7 @@
 
 - **Клиент** (`cmd/client`): читает записи из journald, при необходимости разбирает сообщения с помощью регулярного выражения, формирует пакеты и отправляет их на сервер по HTTP.
 - **Сервер** (`cmd/server`): принимает пакеты, проверяет непрерывность позиции, сопоставляет поля и записывает их в хранилище (по умолчанию используется `MockWriter`).
-- **Экстрактор** (`cmd/extractor`): читает исторические данные из YDB с фильтрами на этапе запроса и пишет их в ротируемые TSV-файлы (опционально сжатыe zstd).
+- **Экстрактор** (`cmd/extractor`): читает исторические данные из YDB с фильтрами на этапе запроса и пишет их в ротируемые TSV-файлы (опционально сжатые zstd).
 
 ## Сборка
 
@@ -69,6 +69,7 @@ sudo apt-get install -y libsystemd-dev  # либо аналог для ваше�
 - `journal_recovery: true` включает режим best-effort восстановления после повреждения журнала (`EBADMSG` / `bad message`). По умолчанию этот режим выключен, так как при обходе поврежденного участка возможна потеря части данных. Без этой опции клиент пишет ошибку о повреждении и сразу завершает работу.
 - `server_url` / `server_urls` задают одну или несколько конечных точек; клиент сохраняет текущую конечную точку, пока запросы выполняются успешно, и переключается на следующую только после временной ошибки (`5xx` или сетевой ошибки).
 - `tls_ca_file` и `tls_use_system_pool` управляют доверенным хранилищем сертификатов клиента.
+- `tls_cert_file` и `tls_key_file` задают клиентский сертификат для mTLS (требуется сервером).
 - Пакеты клиента дополнительно ограничены 10 MB несжатых данных журналов на один запрос.
 - Если размер одной записи превышает 10 MB, она отправляется отдельным запросом из одной записи и не отбрасывается.
 - Каждая исходящая запись содержит `seqno`: монотонно возрастающий номер последовательности на стороне клиента. Первое значение равно времени запуска клиента в миллисекундах Unix epoch.
@@ -131,11 +132,11 @@ openssl x509 -req -in certs/server.csr \
 
 openssl ecparam -name prime256v1 -genkey -noout -out certs/client.key
 openssl req -new -key certs/client.key \
-  -subj "/CN=loglugger-client/O=dev/OU=ydb" \
+  -subj "/CN=client-local/O=dev/OU=local" \
   -out certs/client.csr
 openssl x509 -req -in certs/client.csr \
   -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
-  -out certs/client.crt -days 1825 -sha256
+  -out certs/client.crt -days 825 -sha256
 ```
 
 Если требуется, чтобы сервер проверял не только доверие к CA, но и атрибуты Subject клиентского сертификата, запускайте его так:
@@ -213,10 +214,10 @@ CREATE TABLE `loglugger_positions` (
 
 Замечания по схеме и сопоставлению полей для YDB:
 
-- В `examples/ydbd/target_table.sql` столбцы `log_timestamp_us` и `ts_orig` имеют тип `Timestamp64`.
+- В `examples/ydbd/target_table.sql` столбцы `ts_log` и `ts_orig` имеют тип `Timestamp64`.
 - В `examples/ydbd/field_mapping.yaml` используйте:
-  - `transform: timestamp64` для строковых даты/времени (например, `parsed.P_DTTM` -> `ts_orig` в кастомных полях)
-  - `transform: timestamp64_us` для Unix timestamps в микросекундах (например, `log_timestamp_us`, `realtime_ts` -> `ts_orig`)
+  - `transform: timestamp64_us` для Unix timestamps в микросекундах (например, `log_timestamp_us` -> `ts_log`, `realtime_ts` -> `ts_orig`)
+  - `transform: timestamp64` для строковых даты/времени (например, `parsed.P_DTTM` -> `ts_orig` в кастомных маппингах)
 - Значения без таймзоны при `transform: timestamp64` интерпретируются как UTC.
 - Параметры `message_regex`, `systemd_unit_regex` и `message_regex_no_match` задаются на клиенте, в YAML/JSON-конфигурации.
 - Именованные группы из обоих regex объединяются в одном пространстве `parsed.*` и доступны при настройке записи полей в базу данных.
