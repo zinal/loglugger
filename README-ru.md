@@ -4,6 +4,8 @@
 
 Формальная спецификация: [SPECIFICATION.md](SPECIFICATION.md).
 
+English version: [README.md](README.md).
+
 ## Варианты развертывания
 
 - **Автоматизация через Ansible (рекомендуется для окружений с YDB):** `examples/ansible/README.md`

@@ -4,6 +4,8 @@ A three-component system for collecting records from systemd journald, storing t
 
 See [SPECIFICATION.md](SPECIFICATION.md) for the formal specification.
 
+Russian version: [README-ru.md](README-ru.md).
+
 ## Deployment Options
 
 - **Ansible automation (recommended for YDB environments):** `examples/ansible/README.md`
