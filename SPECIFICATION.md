@@ -128,11 +128,13 @@ When `message_regex` is configured, the client also supports multiline merge:
 ### 4.5 Batching
 
 - **Record count limit**: `batch_size` defines the maximum number of records in a normal batch.
-- **Uncompressed payload limit**: The client must not send more than **10 MB** of log data (uncompressed) in one request.
-  - Log-data size is calculated from record content fields (`message`, `fields` values, and selected metadata string fields), before gzip compression.
-  - If adding another record would exceed 10 MB, the client flushes the current batch and sends the next records in subsequent requests.
-  - If a single record itself is larger than 10 MB, the client still sends it as a single-record batch (exception to the normal cap), rather than dropping it.
-- **Flush triggers**: Batch is sent when record-count limit is reached, uncompressed payload limit is reached, timeout expires, or on graceful shutdown.
+- **Uncompressed JSON limit**: The client must not send more than **15 MiB** of uncompressed JSON body in one request.
+  - Size is the exact byte length of the `POST /v1/batches` JSON document (envelope + `records` array), measured before gzip compression.
+  - The client marshals each record to JSON once when it is added to the batch and tracks the running request size incrementally; records are not re-serialized for size checks or for the final request body.
+  - If adding another record would exceed 15 MiB, the client flushes the current batch and sends the next records in subsequent requests.
+  - If a single record cannot fit under the 15 MiB limit together with the request envelope, the client must fail-stop rather than send an oversized request or drop the record silently.
+- **Flush triggers**: Batch is sent when record-count limit is reached, uncompressed JSON limit is reached, timeout expires, or on graceful shutdown.
+- **Compatibility with server limits**: The default client JSON cap (15 MiB) is chosen to stay below the default server limits of 16 MiB compressed and 32 MiB decompressed, including gzip overhead on poorly compressible payloads.
 
 ### 4.6 HTTP Client
 
@@ -140,7 +142,7 @@ When `message_regex` is configured, the client also supports multiline merge:
   - `GET` for startup position lookup.
   - `POST` for batch submission.
 - **Content-Type**: `application/json` for batch submission.
-- **Content-Encoding**: `gzip` for batch submission. The client **must** gzip-compress the JSON request body and set `Content-Encoding: gzip` on `POST /v1/batches` (see §4.5 for the related uncompressed payload limit).
+- **Content-Encoding**: `gzip` for batch submission. The client **must** gzip-compress the JSON request body and set `Content-Encoding: gzip` on `POST /v1/batches` (see §4.5 for the related uncompressed JSON limit).
 - **Endpoints**:
   - Position lookup: `GET /v1/positions?client_id=<client_id>`
   - Batch submit: `POST /v1/batches`
@@ -176,6 +178,10 @@ Content-Encoding: gzip
 ```
 
 **Batch body encoding**: Clients **must** send the JSON batch body gzip-compressed with `Content-Encoding: gzip` (§4.6). The server **must** accept `gzip`. For interoperability with ad-hoc clients and proxies, the server also accepts an uncompressed body when `Content-Encoding` is omitted or set to `identity`; any other `Content-Encoding` value is rejected.
+
+**Request size limits**: The server rejects oversized batch bodies with HTTP 413:
+- `max_compressed_body_bytes` (default **16 MiB**): maximum raw HTTP body size before decoding `Content-Encoding`.
+- `max_decompressed_body_bytes` (default **32 MiB**): maximum JSON payload size after decompression.
 
 **Transport**: The server listens over TLS (HTTPS). It requires and verifies client certificates (mTLS) and validates client certificate subject fields (see §9).
 
@@ -525,7 +531,7 @@ loglugger/
 | message_regex_no_match | string | send_raw | Client behavior when message regex does not match: `send_raw` or `skip` |
 | multiline_timeout | duration | 1s | Multiline merge timeout; used only when `message_regex` is set |
 | multiline_max_messages | int | 1000 | Max number of source messages merged into one output message; used only when `message_regex` is set |
-| batch_size | int | 50000 | Max records per batch (also constrained by the fixed 10 MB uncompressed log-data limit per request) |
+| batch_size | int | 50000 | Max records per batch (also constrained by the fixed 15 MiB uncompressed JSON limit per request) |
 | batch_timeout | duration | 5s | Max time before flushing partial batch |
 | http_timeout | duration | 30s | HTTP request timeout |
 | retry_delay | duration | 1s | Base delay for exponential backoff |
@@ -544,6 +550,8 @@ loglugger/
 | config_file | string | — | Path to server YAML/JSON configuration file passed via `-config` |
 | listen_addr | string | :27312 | HTTPS listen address |
 | writer_backend | string | mock | Output backend (`mock`, `ydb`) |
+| max_compressed_body_bytes | int | 16777216 | Max raw HTTP body size before decoding `Content-Encoding` (16 MiB) |
+| max_decompressed_body_bytes | int | 33554432 | Max JSON payload size after decompression (32 MiB) |
 | ydb_endpoint | string | — | YDB endpoint |
 | ydb_database | string | — | YDB database path |
 | ydb_table | string | logs | Target table name |
@@ -634,7 +642,8 @@ Each configured attribute is provided as a list. The certificate subject value m
 | Journal corruption (`EBADMSG`) with recovery enabled | Warn about possible data loss; try reopen/reseek recovery; on success resume with `reset: true`; on failure stop | Accept next successful recovery batch with reset; otherwise position stored on server remains unchanged |
 | Persistent journal read I/O errors (non-corruption, e.g. local journald failures) | Retry briefly (~15s) with short delay; if errors persist, flush any buffered batch and stop so a supervisor can restart/alert; do not retry forever while appearing healthy | Position stored on server remains unchanged until a batch is accepted |
 | YDB unavailable | Client retries; server returns 5xx | Fail batch; do not update position |
-| Non-retryable HTTP 4xx on batch submit (e.g. 400/401/403/404/422) | Do not retry; stop the process after logging the error so the already-flushed batch is not skipped; on restart, resume from the server-stored position | Reject batch; do not update position |
+| Non-retryable HTTP 4xx on batch submit (e.g. 400/401/403/404/413/422) | Do not retry; stop the process after logging the error so the already-flushed batch is not skipped; on restart, resume from the server-stored position | Reject batch; do not update position |
+| Single journal record whose JSON exceeds the 15 MiB request limit | Fail-stop with an error; do not send an oversized request and do not skip the record silently | N/A (no request is sent) |
 | Duplicate batch (retry) | Client may retry same batch | Idempotent BulkUpsert; position already updated—reject with 409 if current_position no longer matches |
 | Duplicate / shared `client_id` (misconfiguration or concurrent senders) | Not supported; competing senders will observe intermittent `409`, resets, and possible data duplication or gaps | No uniqueness enforcement; position races and write-before-409 outcomes as described in §5.3.1 are expected |
 

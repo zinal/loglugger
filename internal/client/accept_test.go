@@ -69,7 +69,7 @@ func TestAcceptEntrySkipDoesNotAdvanceProtocolPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	batcher := NewBatcher(10, 0)
+	batcher := NewBatcher(10, 0, "client-1")
 
 	for {
 		entry, err := journal.Next(context.Background())
@@ -82,7 +82,9 @@ func TestAcceptEntrySkipDoesNotAdvanceProtocolPosition(t *testing.T) {
 		if !AcceptEntry(journal, parser, entry) {
 			continue
 		}
-		batcher.Add(entry)
+		if err := batcher.Add(entry); err != nil {
+			t.Fatalf("Add() error = %v", err)
+		}
 	}
 
 	batch := batcher.Flush()
@@ -123,7 +125,7 @@ func TestAcceptEntrySkipPreservesPositionAcrossBatchBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	firstBatcher := NewBatcher(1, 0)
+	firstBatcher := NewBatcher(1, 0, "client-1")
 	entry, err := journal.Next(context.Background())
 	if err != nil || entry == nil {
 		t.Fatalf("Next() = %v, %v", entry, err)
@@ -131,7 +133,9 @@ func TestAcceptEntrySkipPreservesPositionAcrossBatchBoundary(t *testing.T) {
 	if !AcceptEntry(journal, parser, entry) {
 		t.Fatal("expected first entry to be accepted")
 	}
-	firstBatcher.Add(entry)
+	if err := firstBatcher.Add(entry); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
 	first := firstBatcher.Flush()
 	if first == nil {
 		t.Fatal("expected first batch")
@@ -152,7 +156,7 @@ func TestAcceptEntrySkipPreservesPositionAcrossBatchBoundary(t *testing.T) {
 		t.Fatalf("acked after skip = %q, want c1", journal.acked)
 	}
 
-	secondBatcher := NewBatcher(1, 0)
+	secondBatcher := NewBatcher(1, 0, "client-1")
 	next, err := journal.Next(context.Background())
 	if err != nil || next == nil {
 		t.Fatalf("Next() next = %v, %v", next, err)
@@ -160,7 +164,9 @@ func TestAcceptEntrySkipPreservesPositionAcrossBatchBoundary(t *testing.T) {
 	if !AcceptEntry(journal, parser, next) {
 		t.Fatal("expected matching entry after skip to be accepted")
 	}
-	secondBatcher.Add(next)
+	if err := secondBatcher.Add(next); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
 	second := secondBatcher.Flush()
 	if second == nil {
 		t.Fatal("expected second batch")

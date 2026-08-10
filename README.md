@@ -72,7 +72,7 @@ Server configuration:
 - Request-size protection is configurable:
   - `max_compressed_body_bytes`: maximum raw HTTP request body size before decoding `Content-Encoding`.
   - `max_decompressed_body_bytes`: maximum decoded JSON payload size after decompression.
-  - Defaults: `8388608` (8 MiB) and `33554432` (32 MiB).
+  - Defaults: `16777216` (16 MiB) and `33554432` (32 MiB).
 
 **Client** (Linux only):
 ```bash
@@ -96,8 +96,8 @@ Client configuration:
 - `server_url` / `server_urls` configure one or more endpoints; the client keeps using the current endpoint while requests succeed and switches to the next one only after a transient failure (`5xx` or network error).
 - `tls_ca_file` and `tls_use_system_pool` control the client trust store.
 - `tls_cert_file` and `tls_key_file` provide the client certificate for mTLS (required by the server).
-- Client batches are additionally limited to 10 MB of uncompressed log data per request.
-- If a single record exceeds 10 MB, it is sent as a single-record request and is not dropped.
+- Client batches are additionally limited to 15 MiB of uncompressed JSON per request (exact body size is tracked incrementally while the batch is assembled).
+- If a single record cannot fit under that limit together with the request envelope, the client stops with an error (the record is not silently dropped and is not sent above the limit).
 - Every outgoing record includes `seqno`: a monotonically increasing client-side sequence number. The first value equals client startup time in milliseconds since Unix epoch.
 
 When recovery is enabled and corruption is detected, the client warns that data loss is possible, tries to reopen the journal and resume from the last good position, and falls back to seeking past the last good timestamp. If recovery succeeds, the next batch is sent with a reset so the server accepts the new position. If recovery still fails, the client stops.

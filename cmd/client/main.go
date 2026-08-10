@@ -81,7 +81,7 @@ func main() {
 		}
 	}()
 
-	batcher := client.NewBatcher(cfg.BatchSize, cfg.BatchTimeout)
+	batcher := client.NewBatcher(cfg.BatchSize, cfg.BatchTimeout, cfg.ClientID)
 	seqnoGenerator := client.NewSeqNoGenerator(time.Now())
 	sender := client.NewSender(client.SenderConfig{
 		ServerURLs:  cfg.ServerURLs,
@@ -161,7 +161,9 @@ func main() {
 		}
 		seqno := seqnoGenerator.Next()
 		entry.Record.SeqNo = &seqno
-		batcher.Add(entry)
+		if err := batcher.Add(entry); err != nil {
+			return err
+		}
 
 		if batcher.ShouldFlush() {
 			if batch := batcher.Flush(); batch != nil {
@@ -544,13 +546,7 @@ func sendBatch(ctx context.Context, journal client.JournalReader, sender client.
 		"next_position", batch.NextPosition,
 		"reset", reset,
 	)
-	req := &models.BatchRequest{
-		Reset:           reset,
-		CurrentPosition: batch.CurrentPosition,
-		NextPosition:    batch.NextPosition,
-		Records:         batch.Records,
-	}
-	resp, err := sender.Send(ctx, req)
+	resp, err := sender.SendBatch(ctx, batch, reset)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			slog.Info("send interrupted", "error", err)

@@ -137,6 +137,58 @@ func TestSenderSendUsesGzipCompression(t *testing.T) {
 	}
 }
 
+func TestSenderSendBatchUsesPreencodedRecords(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("Content-Encoding = %q, want gzip", r.Header.Get("Content-Encoding"))
+		}
+		gz, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("gzip.NewReader() error = %v", err)
+		}
+		defer gz.Close()
+		raw, err := io.ReadAll(gz)
+		if err != nil {
+			t.Fatalf("read gzip body error = %v", err)
+		}
+		var req models.BatchRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Fatalf("json.Unmarshal() error = %v", err)
+		}
+		if req.ClientID != "client-1" || !req.Reset || req.NextPosition != "p2" {
+			t.Fatalf("unexpected request: %+v", req)
+		}
+		if len(req.Records) != 1 || req.Records[0].Message != "hello" {
+			t.Fatalf("records = %+v", req.Records)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","next_position":"p2"}`))
+	}))
+	defer srv.Close()
+
+	s := NewSender(SenderConfig{
+		ServerURLs:  []string{srv.URL},
+		ClientID:    "client-1",
+		HTTPTimeout: 2 * time.Second,
+		RetryDelay:  time.Millisecond,
+	})
+	recordJSON, err := json.Marshal(models.Record{Message: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := s.SendBatch(context.Background(), &Batch{
+		Records:      []models.Record{{Message: "hello"}},
+		RecordJSONs:  []json.RawMessage{recordJSON},
+		NextPosition: "p2",
+	}, true)
+	if err != nil {
+		t.Fatalf("SendBatch() error = %v", err)
+	}
+	if resp == nil || resp.Status != "ok" {
+		t.Fatalf("SendBatch() response = %+v, want status ok", resp)
+	}
+}
+
 func TestSenderCurrentPositionSwitchesEndpointOnFailure(t *testing.T) {
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
