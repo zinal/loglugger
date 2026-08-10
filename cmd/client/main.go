@@ -133,6 +133,16 @@ func main() {
 
 	flushTicker := time.NewTicker(cfg.BatchTimeout)
 	defer flushTicker.Stop()
+	idleTimer := time.NewTimer(100 * time.Millisecond)
+	defer idleTimer.Stop()
+	stopIdleTimer := func() {
+		if !idleTimer.Stop() {
+			select {
+			case <-idleTimer.C:
+			default:
+			}
+		}
+	}
 	const (
 		resumeLogMinEmptyReads = 10
 		resumeLogMinEmptyFor   = 2 * time.Second
@@ -177,40 +187,45 @@ func main() {
 		slog.Error("send batch failed; stopping to avoid dropping the flushed batch", "error", err)
 		os.Exit(1)
 	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			if multilineMerger != nil {
-				if err := processEntry(multilineMerger.Drain()); err != nil {
-					stopOnSendFailure(err)
-				}
-			}
-			if batch := batcher.Flush(); batch != nil {
-				slog.Debug("flush on shutdown", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
-				if _, err := sendBatch(ctx, journal, sender, batch, reset); err != nil {
-					stopOnSendFailure(err)
-				}
-			}
-			slog.Info("shutting down")
-			return
-		case <-flushTicker.C:
-			if err := drainExpiredMultiline(time.Now()); err != nil {
+	shutdown := func() {
+		if multilineMerger != nil {
+			if err := processEntry(multilineMerger.Drain()); err != nil {
 				stopOnSendFailure(err)
 			}
-			if batch := batcher.Flush(); batch != nil {
-				slog.Debug("flush by timeout", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
-				var sendErr error
-				reset, sendErr = sendBatch(ctx, journal, sender, batch, reset)
-				if sendErr != nil {
-					stopOnSendFailure(sendErr)
-				}
-			}
-		default:
 		}
+		if batch := batcher.Flush(); batch != nil {
+			slog.Debug("flush on shutdown", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
+			if _, err := sendBatch(ctx, journal, sender, batch, reset); err != nil {
+				stopOnSendFailure(err)
+			}
+		}
+		slog.Info("shutting down")
+	}
+	flushByTimeout := func() {
+		if err := drainExpiredMultiline(time.Now()); err != nil {
+			stopOnSendFailure(err)
+		}
+		if batch := batcher.Flush(); batch != nil {
+			slog.Debug("flush by timeout", "records", len(batch.Records), "current_position", batch.CurrentPosition, "next_position", batch.NextPosition, "reset", reset)
+			var sendErr error
+			reset, sendErr = sendBatch(ctx, journal, sender, batch, reset)
+			if sendErr != nil {
+				stopOnSendFailure(sendErr)
+			}
+		}
+	}
 
+	// Avoid select{..., default:} around journal.Next: under a continuous
+	// journal stream that pattern busy-polls and races the flush ticker.
+	// batch_timeout is enforced by Batcher.ShouldFlush while reading; the
+	// ticker only wakes idle waits (no new entries) and multiline expiry.
+	for {
 		entry, err := journal.Next(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				shutdown()
+				return
+			}
 			if isJournalCorruption(err) {
 				recoveredReset, recoveryErr := recoverFromJournalCorruption(ctx, journal, cfg.JournalRecovery)
 				if recoveryErr != nil {
@@ -234,10 +249,27 @@ func main() {
 			if emptyReads%100 == 0 {
 				slog.Debug("journal has no new entries", "empty_reads", emptyReads)
 			}
+			// Flush partial batches whose batch_timeout already elapsed while
+			// we were reading; do not wait for the next ticker under load gaps.
+			if batcher.ShouldFlush() {
+				flushByTimeout()
+				continue
+			}
 			if err := drainExpiredMultiline(time.Now()); err != nil {
 				stopOnSendFailure(err)
 			}
-			time.Sleep(100 * time.Millisecond)
+			// Block until flush tick, short idle poll, or shutdown. journal.Next
+			// already waited briefly for appends; avoid a select/default spin.
+			stopIdleTimer()
+			idleTimer.Reset(100 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				shutdown()
+				return
+			case <-flushTicker.C:
+				flushByTimeout()
+			case <-idleTimer.C:
+			}
 			continue
 		}
 		if emptyReads > 0 {

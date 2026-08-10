@@ -3,6 +3,7 @@ package client
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ydb-platform/loglugger/internal/models"
 )
@@ -60,6 +61,28 @@ func TestBatcher_ShouldFlushByLogDataSize(t *testing.T) {
 	b.Add(&JournalEntry{Record: models.Record{Message: "12345"}, Position: "p2", Cursor: "p2"})
 	if !b.ShouldFlush() {
 		t.Fatal("expected flush when byte limit is reached")
+	}
+}
+
+func TestBatcher_ShouldFlushByTimeout(t *testing.T) {
+	b := NewBatcher(100, 50*time.Millisecond).(*batcher)
+	b.Add(&JournalEntry{Record: models.Record{Message: "a"}, Position: "p1", Cursor: "p1"})
+	if b.ShouldFlush() {
+		t.Fatal("should not flush before batch_timeout")
+	}
+	b.startedAt = time.Now().Add(-b.timeout)
+	if !b.ShouldFlush() {
+		t.Fatal("expected flush once batch_timeout has elapsed")
+	}
+	batch := b.Flush()
+	if batch == nil {
+		t.Fatal("expected timeout flush to produce a batch")
+	}
+	if b.ShouldFlush() {
+		t.Fatal("should not flush after timeout batch was sent")
+	}
+	if !b.startedAt.IsZero() {
+		t.Fatal("startedAt should reset after a full flush")
 	}
 }
 
