@@ -324,6 +324,41 @@ func TestYDBAuthOptionValidation(t *testing.T) {
 	}
 }
 
+func TestNormalizeOutputPrefix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		raw     string
+		want    string
+		wantErr bool
+	}{
+		{raw: "extract", want: "extract"},
+		{raw: "  extract  ", want: "extract"},
+		{raw: "../extract", want: "extract"},
+		{raw: "foo/../evil", want: "evil"},
+		{raw: "dir/prefix", want: "prefix"},
+		{raw: "", wantErr: true},
+		{raw: ".", wantErr: true},
+		{raw: "..", wantErr: true},
+		{raw: "   ", wantErr: true},
+	}
+	for _, tt := range tests {
+		got, err := normalizeOutputPrefix(tt.raw)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("normalizeOutputPrefix(%q) error = nil, want error", tt.raw)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("normalizeOutputPrefix(%q) error = %v", tt.raw, err)
+		}
+		if got != tt.want {
+			t.Fatalf("normalizeOutputPrefix(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
 func TestExtractionWriterWritesAndRotates(t *testing.T) {
 	t.Parallel()
 
@@ -360,6 +395,88 @@ func TestExtractionWriterWritesAndRotates(t *testing.T) {
 	}
 	if len(entries) < 2 {
 		t.Fatalf("expected rotated files, got %d entries", len(entries))
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "extract_000001.tsv"))
+	if err != nil {
+		t.Fatalf("stat first output file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("output file mode = %04o, want 0600", perm)
+	}
+}
+
+func TestExtractionWriterUsesBasenamePrefix(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writer, err := newExtractionWriter(extractConfig{
+		OutputDir:    dir,
+		OutputPrefix: "../escape",
+		MaxFileSize:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("newExtractionWriter() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	path := filepath.Join(dir, "escape_000001.tsv")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected basename-local output file: %v", err)
+	}
+	escaped := filepath.Join(filepath.Dir(dir), "escape_000001.tsv")
+	if _, err := os.Stat(escaped); err == nil {
+		t.Fatalf("output escaped parent dir via prefix: found %s", escaped)
+	}
+}
+
+func TestExtractionWriterRejectsExistingFileAndSymlink(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "extract_000001.tsv")
+	if err := os.WriteFile(existing, []byte("keep-me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newExtractionWriter(extractConfig{
+		OutputDir:    dir,
+		OutputPrefix: "extract",
+		MaxFileSize:  1 << 20,
+	}); err == nil {
+		t.Fatal("expected error when output file already exists")
+	}
+	got, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "keep-me" {
+		t.Fatalf("existing file overwritten: got %q", got)
+	}
+
+	symlinkDir := t.TempDir()
+	target := filepath.Join(symlinkDir, "secret")
+	if err := os.WriteFile(target, []byte("secret-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(symlinkDir, "extract_000001.tsv")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if _, err := newExtractionWriter(extractConfig{
+		OutputDir:    symlinkDir,
+		OutputPrefix: "extract",
+		MaxFileSize:  1 << 20,
+	}); err == nil {
+		t.Fatal("expected error when output path is a symlink")
+	}
+	got, err = os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "secret-data" {
+		t.Fatalf("symlink target overwritten: got %q", got)
 	}
 }
 
