@@ -28,12 +28,18 @@ build_client() {
 			echo "hint: install zig, or use ./build-docker.sh instead" >&2
 			exit 1
 		fi
+		if [ ! -d /usr/include/systemd ]; then
+			echo "error: /usr/include/systemd not found; install libsystemd-dev (or equivalent)" >&2
+			exit 1
+		fi
 		echo "Building loglugger-client with zig targeting glibc ${glibc_version}"
 		wrapper="$(mktemp)"
-		# Host systemd headers pull in the build-host features.h, which redefines
-		# __GLIBC_MINOR__ relative to zig's target; keep that as a non-fatal warning.
+		incdir="$(mktemp -d)"
+		# Expose only systemd headers. Mixing the full host /usr/include with zig's
+		# target libc breaks pthread initializers in runtime/cgo on newer distros.
+		ln -s /usr/include/systemd "${incdir}/systemd"
 		printf '%s\n' '#!/bin/sh' \
-			"exec \"${zig_bin}\" cc -target x86_64-linux-gnu.${glibc_version} -Wno-macro-redefined -I/usr/include \"\$@\"" \
+			"exec \"${zig_bin}\" cc -target x86_64-linux-gnu.${glibc_version} -I${incdir} \"\$@\"" \
 			>"${wrapper}"
 		chmod +x "${wrapper}"
 		# netgo avoids zig/cgo unresolved libresolv symbols (res_search) while
@@ -41,9 +47,11 @@ build_client() {
 		# built with a different CC/tag set.
 		if ! CGO_ENABLED=1 CC="${wrapper}" go build -a -tags netgo -ldflags "${LDFLAGS}" -o bin/loglugger-client ./cmd/client; then
 			rm -f "${wrapper}"
+			rm -rf "${incdir}"
 			exit 1
 		fi
 		rm -f "${wrapper}"
+		rm -rf "${incdir}"
 	else
 		CGO_ENABLED=1 go build -ldflags "${LDFLAGS}" -o bin/loglugger-client ./cmd/client
 	fi
