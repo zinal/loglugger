@@ -8,15 +8,7 @@ Russian version: [CHANGELOG-ru.md](CHANGELOG-ru.md).
 
 ## [Unreleased]
 
-High-level changes on `main` since the `v1.0` tag.
-
-### Changed
-
-- YAML/JSON configuration and field-mapping files are decoded strictly: unknown keys (including typos) are rejected at load time.
-- Delivery semantics are documented as **at-least-once** (with ordered per-client processing), replacing the earlier exactly-once wording.
-- Client batch size limits are measured as the exact uncompressed JSON request body (default cap **15 MiB**), instead of an approximate uncompressed log-data budget.
-- Default server compressed request-body limit raised from 8 MiB to **16 MiB**, aligned with the client JSON cap and the existing 32 MiB decompressed limit.
-- Go toolchain upgraded from 1.24.x to **1.26.5**.
+## [1.1] - 2026-08-11
 
 ### Added
 
@@ -27,6 +19,15 @@ High-level changes on `main` since the `v1.0` tag.
 - Client configuration validation for batch/HTTP timing settings and rejection of credentials embedded in server URLs.
 - Ansible example support for storing static YDB passwords in **Ansible Vault**, with server config installed mode `0600`.
 - Ansible roles restart Loglugger services when installed binaries are replaced.
+
+### Changed
+
+- YAML/JSON configuration and field-mapping files are decoded strictly: unknown keys (including typos) are rejected at load time.
+- Delivery semantics are documented as **at-least-once** (with ordered per-client processing), replacing the earlier exactly-once wording.
+- Client batch size limits are measured as the exact uncompressed JSON request body (default cap **15 MiB**), instead of an approximate uncompressed log-data budget.
+- Default server compressed request-body limit raised from 8 MiB to **16 MiB**, aligned with the client JSON cap and the existing 32 MiB decompressed limit.
+- Go toolchain upgraded from 1.24.x to **1.26.5**.
+- Documentation and examples updated for gzip `Content-Encoding` on batch POST, periodic multi-endpoint reshuffle, `client_id` uniqueness expectations, and ydbd deployment samples.
 
 ### Fixed
 
@@ -50,3 +51,7 @@ High-level changes on `main` since the `v1.0` tag.
 ## [1.0] - 2026-08-10
 
 Initial tagged release (`v1.0`).
+
+[Unreleased]: https://github.com/zinal/loglugger/compare/v1.1...HEAD
+[1.1]: https://github.com/zinal/loglugger/compare/v1.0...v1.1
+[1.0]: https://github.com/zinal/loglugger/releases/tag/v1.0
