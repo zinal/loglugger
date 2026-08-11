@@ -6,6 +6,8 @@ See [SPECIFICATION.md](SPECIFICATION.md) for the formal specification.
 
 Russian version: [README-ru.md](README-ru.md).
 
+Downloads: [GitHub Releases](https://github.com/zinal/loglugger/releases).
+
 ## Deployment Options
 
 - **Ansible automation (recommended for YDB environments):** `examples/ansible/README.md`
@@ -17,43 +19,6 @@ Russian version: [README-ru.md](README-ru.md).
 - **Client** (`cmd/client`): Reads records from journald, optionally parses messages with a regular expression, groups them into batches, and sends them to the server over HTTP.
 - **Server** (`cmd/server`): Accepts batches, validates position continuity, maps fields, and writes them to storage (`MockWriter` by default).
 - **Extractor** (`cmd/extractor`): Reads historical records from YDB with query-time filters and writes rotating TSV files (optionally zstd-compressed).
-
-## Build
-
-```bash
-sudo apt-get install -y libsystemd-dev  # or your operating system equivalent
-./build.sh
-```
-
-`loglugger-server` and `loglugger-extractor` are built with `CGO_ENABLED=0` and are portable across Linux glibc versions. `loglugger-client` needs CGO (journald / `libsystemd`) and therefore inherits the glibc version of the build host.
-
-If the client fails on the target host with an error like:
-
-```text
-/opt/ydb/loglugger/bin/loglugger-client: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.32' not found
-```
-
-rebuild with a portable client binary (Ubuntu 20.04 / glibc 2.31 baseline):
-
-```bash
-./build-docker.sh
-# or, with zig installed:
-# LOGLUGGER_PORTABLE=1 ./build.sh
-```
-
-To build a portable distribution archive (binaries, docs, examples, and Ansible playbooks) into `dist/`:
-
-```bash
-./build-ditto.sh
-```
-
-Then redeploy the binaries from `./bin` (or unpack the archive from `dist/`).
-
-This repository vendors a fork of `github.com/coreos/go-systemd/v22` under `third_party/go-systemd` and uses it via a local `replace` in `go.mod`. The fork adds native journald namespace support (`sd_journal_open_namespace`), which is required for reliable reading from non-default namespaces.
-
-The client requires Linux for journald support. On macOS and Windows, the client fails at startup with "journald is only supported on Linux".
-
-After building, use `./bin/loglugger-server`, `./bin/loglugger-client`, and `./bin/loglugger-extractor` in the run commands below.
 
 ## Run
 
@@ -192,6 +157,41 @@ For a local end-to-end run with the mock backend:
 ```bash
 ./bin/loglugger-client -config examples/config/client.yaml
 ```
+
+## Build
+
+```bash
+sudo apt-get install -y libsystemd-dev  # or your operating system equivalent
+./build.sh
+```
+
+`loglugger-server` and `loglugger-extractor` are built with `CGO_ENABLED=0` and are portable across Linux glibc versions. `loglugger-client` needs CGO (journald / `libsystemd`) and therefore inherits the glibc version of the build host.
+
+If the client fails on the target host with an error like:
+
+```text
+/opt/ydb/loglugger/bin/loglugger-client: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.32' not found
+```
+
+rebuild with a portable client binary (Ubuntu 20.04 / glibc 2.31 baseline):
+
+```bash
+./build-docker.sh
+# or, with zig installed:
+# LOGLUGGER_PORTABLE=1 ./build.sh
+```
+
+To build a portable distribution archive (binaries, docs, examples, and Ansible playbooks) into `dist/`:
+
+```bash
+./build-ditto.sh
+```
+
+Then redeploy the binaries from `./bin` (or unpack the archive from `dist/`).
+
+This repository vendors a fork of `github.com/coreos/go-systemd/v22` under `third_party/go-systemd` and uses it via a local `replace` in `go.mod`. The fork adds native journald namespace support (`sd_journal_open_namespace`), which is required for reliable reading from non-default namespaces.
+
+The client requires Linux for journald support. On macOS and Windows, the client fails at startup with "journald is only supported on Linux".
 
 ## Tests
 
