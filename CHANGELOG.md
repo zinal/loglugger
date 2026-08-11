@@ -48,7 +48,7 @@ Russian version: [CHANGELOG-ru.md](CHANGELOG-ru.md).
 
 - Ansible example no longer encourages plaintext YDB passwords in inventory; credentials move to an encrypted Vault file and a restricted server config file mode.
 
-## [1.0] - 2026-08-10
+## [1.0] - 2026-04-28
 
 Initial tagged release (`v1.0`).
 
